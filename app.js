@@ -107,6 +107,7 @@
     previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
     settingsOpen: false,
     imageEditor: null,
+    videoEditor: null,
     logos: loadLogos(),
     editId: null,
     db: null,
@@ -215,6 +216,37 @@
     return fileExtension({ name }) || !extension ? name : `${name}.${extension}`;
   }
 
+  function clampNumber(value, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return min;
+    return Math.max(min, Math.min(max, number));
+  }
+
+  function videoPlayback(media) {
+    const sourceDuration = Number(media?.durationSeconds || 0);
+    const stored = media?.playback || {};
+    const maxStart = Math.max(0, sourceDuration - 0.1);
+    const startSeconds = clampNumber(stored.startSeconds ?? 0, 0, maxStart);
+    const fallbackDuration = sourceDuration ? Math.max(0.1, sourceDuration - startSeconds) : MAX_VIDEO_SECONDS;
+    const durationSeconds = clampNumber(stored.durationSeconds ?? fallbackDuration, 0.1, MAX_VIDEO_SECONDS);
+    const segmentSeconds = sourceDuration ? Math.max(0.1, sourceDuration - startSeconds) : durationSeconds;
+    return {
+      startSeconds,
+      durationSeconds,
+      segmentSeconds,
+      loops: durationSeconds > segmentSeconds + 0.05,
+    };
+  }
+
+  function playbackMeta(media) {
+    if (!media?.type?.startsWith("video/")) return "";
+    const playback = videoPlayback(media);
+    const sourceDuration = Number(media.durationSeconds || 0);
+    if (!media.playback || !sourceDuration) return "";
+    const loopText = playback.loops ? " · loop" : "";
+    return ` · προβολή ${formatSeconds(playback.durationSeconds)} από ${formatSeconds(playback.startSeconds)}${loopText}`;
+  }
+
   function githubSettingsReady() {
     const settings = state.github;
     return Boolean(settings.owner && settings.repo && settings.branch && settings.token);
@@ -311,6 +343,74 @@
         ${subtext ? `<span>${escapeHtml(subtext)}</span>` : ""}
       </div>
     `;
+  }
+
+  function videoPlaybackAttrs(media) {
+    const playback = videoPlayback(media);
+    return [
+      `data-video-start="${escapeHtml(playback.startSeconds)}"`,
+      `data-video-duration="${escapeHtml(playback.durationSeconds)}"`,
+      `data-video-source-duration="${escapeHtml(media?.durationSeconds || playback.durationSeconds)}"`,
+    ].join(" ");
+  }
+
+  function bindTimedVideos() {
+    document.querySelectorAll("video[data-video-duration]").forEach((video) => {
+      if (video.dataset.timedBound === "true") return;
+      video.dataset.timedBound = "true";
+      const read = () => ({
+        start: Number(video.dataset.videoStart || 0),
+        target: Number(video.dataset.videoDuration || 0),
+        sourceDuration: Number(video.dataset.videoSourceDuration || video.duration || 0),
+      });
+      const reset = () => {
+        const { start } = read();
+        video.dataset.playedSeconds = "0";
+        video.dataset.lastTime = String(start);
+        if (Number.isFinite(video.duration) && Math.abs(video.currentTime - start) > 0.08) {
+          video.currentTime = start;
+        }
+      };
+      video.addEventListener("loadedmetadata", reset);
+      video.addEventListener("play", () => {
+        const { start } = read();
+        if (video.currentTime < start || Math.abs(Number(video.dataset.playedSeconds || 0)) < 0.01) {
+          video.currentTime = start;
+        }
+        video.dataset.lastTime = String(video.currentTime);
+      });
+      video.addEventListener("seeking", () => {
+        video.dataset.lastTime = String(video.currentTime);
+      });
+      video.addEventListener("timeupdate", () => {
+        const { start, target, sourceDuration } = read();
+        if (!target || !sourceDuration) return;
+        const segmentEnd = Math.min(sourceDuration, start + target);
+        const lastTime = Number(video.dataset.lastTime || video.currentTime);
+        let played = Number(video.dataset.playedSeconds || 0);
+        if (video.currentTime >= lastTime) played += video.currentTime - lastTime;
+        video.dataset.playedSeconds = String(played);
+        video.dataset.lastTime = String(video.currentTime);
+        if (played >= target) {
+          video.pause();
+          video.currentTime = Math.min(segmentEnd, sourceDuration);
+          return;
+        }
+        if (video.currentTime >= segmentEnd - 0.04) {
+          video.currentTime = start;
+          video.dataset.lastTime = String(start);
+          if (!video.paused) video.play().catch(() => {});
+        }
+      });
+      video.addEventListener("ended", () => {
+        const { start, target } = read();
+        const played = Number(video.dataset.playedSeconds || 0);
+        if (played < target) {
+          video.currentTime = start;
+          video.play().catch(() => {});
+        }
+      });
+    });
   }
 
   function pageUrl(slug) {
@@ -623,6 +723,7 @@
       size: item.size,
       kind: item.kind,
       durationSeconds: item.durationSeconds,
+      playback: item.playback || null,
       githubPath: path,
       remoteUrl: rawGithubUrl(path),
     };
@@ -741,10 +842,12 @@
       </div>
       ${state.settingsOpen ? renderGithubSettingsModal() : ""}
       ${state.imageEditor ? renderImageEditorModal() : ""}
+      ${state.videoEditor ? renderVideoEditorModal() : ""}
     `;
 
     bindAdminEvents();
     hydrateThumbs();
+    bindTimedVideos();
   }
 
   function renderForm() {
@@ -902,6 +1005,7 @@
       size: item.size,
       kind: item.kind,
       durationSeconds: item.durationSeconds,
+      playback: item.playback,
       pendingIndex: index,
     }));
     const files = pending.length ? pending : existing;
@@ -912,10 +1016,12 @@
           <div data-thumb="${escapeHtml(file.id)}" class="thumb-fallback">${icon(file.type.startsWith("video/") ? "video" : "image")}</div>
           <div>
             ${file.pendingIndex !== undefined ? `<input class="input file-rename" data-index="${file.pendingIndex}" value="${escapeHtml(file.name)}" aria-label="Μετονομασία αρχείου" />` : `<p class="file-name">${escapeHtml(file.name)}</p>`}
-            <p class="file-meta">${escapeHtml(file.kind === "image" ? "thumbnail" : file.kind === "video" ? "video" : mediaKind([file]))} · ${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα μπει σε ζευγάρι" : ""}</p>
+            <p class="file-meta">${escapeHtml(file.kind === "image" ? "thumbnail" : file.kind === "video" ? "video" : mediaKind([file]))} · ${escapeHtml(mediaMeta(file))}${escapeHtml(playbackMeta(file))}${file.pendingIndex !== undefined ? " · θα μπει σε ζευγάρι" : ""}</p>
           </div>
           <div class="media-file-actions">
             ${file.pendingIndex !== undefined && file.kind === "image" ? `<button class="icon-button edit-thumbnail" type="button" data-index="${file.pendingIndex}" title="Επεξεργασία thumbnail">${icon("edit")}</button>` : ""}
+            ${file.pendingIndex !== undefined && file.kind === "video" ? `<button class="icon-button edit-video" type="button" data-index="${file.pendingIndex}" title="Χρόνος βίντεο">${icon("edit")}</button>` : ""}
+            ${file.pendingIndex === undefined && file.type.startsWith("video/") ? `<button class="icon-button edit-existing-video" type="button" data-id="${escapeHtml(file.id)}" title="Χρόνος βίντεο">${icon("edit")}</button>` : ""}
             ${file.pendingIndex !== undefined ? `<button class="icon-button remove-pending" type="button" data-index="${file.pendingIndex}" title="Αφαίρεση">${icon("x")}</button>` : ""}
           </div>
         </div>
@@ -990,6 +1096,50 @@
           <div class="settings-actions">
             <button class="secondary" type="button" id="resetImageEditor">Επαναφορά</button>
             <button class="primary" type="button" id="saveImageEditor">${icon("edit")} Αποθήκευση thumbnail</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function renderVideoEditorModal() {
+    const editor = state.videoEditor;
+    const duration = Number(editor.durationSeconds || 0);
+    const maxStart = Math.max(0, duration - 0.1);
+    const segment = Math.max(0.1, duration - editor.startSeconds);
+    const loops = editor.displaySeconds > segment + 0.05;
+    return `
+      <div class="modal-backdrop" role="presentation">
+        <section class="video-editor-modal" role="dialog" aria-modal="true" aria-label="Χρόνος βίντεο">
+          <div class="settings-modal-head">
+            <div>
+              <h2>Χρόνος βίντεο</h2>
+              <p>${escapeHtml(editor.name)} · ακριβής διάρκεια ${formatSeconds(duration)}</p>
+            </div>
+            <button class="icon-button" id="closeVideoEditor" type="button" title="Κλείσιμο">${icon("x")}</button>
+          </div>
+          <div class="video-editor-layout">
+            <video class="video-editor-preview" src="${escapeHtml(editor.sourceUrl)}" controls playsinline></video>
+            <div class="editor-controls">
+              <label>
+                <span>Έναρξη στο sec</span>
+                <input id="videoStartRange" type="range" min="0" max="${escapeHtml(maxStart)}" step="0.01" value="${escapeHtml(editor.startSeconds)}" />
+                <input class="input" id="videoStartInput" type="number" min="0" max="${escapeHtml(maxStart)}" step="0.01" value="${escapeHtml(editor.startSeconds)}" />
+              </label>
+              <label>
+                <span>Χρόνος προβολής σε sec</span>
+                <input id="videoDurationRange" type="range" min="0.1" max="${MAX_VIDEO_SECONDS}" step="0.01" value="${escapeHtml(editor.displaySeconds)}" />
+                <input class="input" id="videoDurationInput" type="number" min="0.1" max="${MAX_VIDEO_SECONDS}" step="0.01" value="${escapeHtml(editor.displaySeconds)}" />
+              </label>
+              <div class="url-note">
+                Θα παίξει ${formatSeconds(editor.displaySeconds)} από το ${formatSeconds(editor.startSeconds)}.
+                ${loops ? "Επειδή ο χρόνος είναι μεγαλύτερος από το διαθέσιμο κομμάτι, θα κάνει loop." : "Αν μικρύνεις τον χρόνο, θα σταματά εκεί."}
+              </div>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="secondary" type="button" id="resetVideoEditor">Επαναφορά</button>
+            <button class="primary" type="button" id="saveVideoEditor">${icon("edit")} Αποθήκευση χρόνου</button>
           </div>
         </section>
       </div>
@@ -1165,6 +1315,9 @@
     document.getElementById("closeImageEditor")?.addEventListener("click", closeImageEditor);
     document.getElementById("resetImageEditor")?.addEventListener("click", resetImageEditor);
     document.getElementById("saveImageEditor")?.addEventListener("click", saveEditedThumbnail);
+    document.getElementById("closeVideoEditor")?.addEventListener("click", closeVideoEditor);
+    document.getElementById("resetVideoEditor")?.addEventListener("click", resetVideoEditor);
+    document.getElementById("saveVideoEditor")?.addEventListener("click", saveVideoEditor);
 
     const title = document.getElementById("title");
     const description = document.getElementById("description");
@@ -1222,6 +1375,12 @@
     document.querySelectorAll(".edit-thumbnail").forEach((button) => {
       button.addEventListener("click", () => openImageEditor(Number(button.dataset.index)));
     });
+    document.querySelectorAll(".edit-video").forEach((button) => {
+      button.addEventListener("click", () => openPendingVideoEditor(Number(button.dataset.index)));
+    });
+    document.querySelectorAll(".edit-existing-video").forEach((button) => {
+      button.addEventListener("click", () => openExistingVideoEditor(button.dataset.id));
+    });
     document.querySelectorAll(".file-rename").forEach((input) => {
       input.addEventListener("input", () => {
         const item = state.selectedFiles[Number(input.dataset.index)];
@@ -1238,6 +1397,7 @@
     });
     bindImageEditorControls();
     drawImageEditorCanvas();
+    bindVideoEditorControls();
   }
 
   function togglePreview() {
@@ -1296,6 +1456,60 @@
     renderAdmin();
   }
 
+  function videoEditorFromMedia(media, source, extra = {}) {
+    const playback = videoPlayback(media);
+    return {
+      ...extra,
+      source,
+      name: media.name,
+      durationSeconds: Number(media.durationSeconds || 0),
+      startSeconds: Number(playback.startSeconds.toFixed(2)),
+      displaySeconds: Number(playback.durationSeconds.toFixed(2)),
+      originalStartSeconds: 0,
+      originalDisplaySeconds: Number((media.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2)),
+    };
+  }
+
+  function openPendingVideoEditor(index) {
+    const item = state.selectedFiles[index];
+    if (!item || item.kind !== "video") return;
+    const sourceUrl = URL.createObjectURL(item.file);
+    state.videoEditor = {
+      ...videoEditorFromMedia(item, "pending", { index, sourceUrl }),
+      originalStartSeconds: 0,
+      originalDisplaySeconds: Number((item.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2)),
+    };
+    renderAdmin();
+  }
+
+  async function openExistingVideoEditor(fileId) {
+    const page = state.pages.find((item) => item.files.some((file) => file.id === fileId));
+    const media = page?.files.find((file) => file.id === fileId);
+    if (!page || !media || !media.type.startsWith("video/")) return;
+    const sourceUrl = await mediaSrc(media);
+    state.videoEditor = {
+      ...videoEditorFromMedia(media, "existing", { pageId: page.id, fileId, sourceUrl }),
+      originalStartSeconds: 0,
+      originalDisplaySeconds: Number((media.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2)),
+    };
+    renderAdmin();
+  }
+
+  function closeVideoEditor() {
+    if (state.videoEditor?.source === "pending" && state.videoEditor.sourceUrl) {
+      URL.revokeObjectURL(state.videoEditor.sourceUrl);
+    }
+    state.videoEditor = null;
+    renderAdmin();
+  }
+
+  function resetVideoEditor() {
+    if (!state.videoEditor) return;
+    state.videoEditor.startSeconds = 0;
+    state.videoEditor.displaySeconds = Number((state.videoEditor.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2));
+    renderAdmin();
+  }
+
   function resetImageEditor() {
     if (!state.imageEditor) return;
     state.imageEditor.zoom = 1;
@@ -1328,6 +1542,73 @@
       });
     });
     bindCropFrameDrag();
+  }
+
+  function bindVideoEditorControls() {
+    const editor = state.videoEditor;
+    if (!editor) return;
+    const preview = document.querySelector(".video-editor-preview");
+    const startRange = document.getElementById("videoStartRange");
+    const startInput = document.getElementById("videoStartInput");
+    const durationRange = document.getElementById("videoDurationRange");
+    const durationInput = document.getElementById("videoDurationInput");
+    const sync = (key, value) => {
+      if (key === "startSeconds") {
+        const maxStart = Math.max(0, Number(editor.durationSeconds || 0) - 0.1);
+        editor.startSeconds = Number(clampNumber(value, 0, maxStart).toFixed(2));
+        if (startRange) startRange.value = String(editor.startSeconds);
+        if (startInput) startInput.value = String(editor.startSeconds);
+        if (preview) preview.currentTime = editor.startSeconds;
+      } else {
+        editor.displaySeconds = Number(clampNumber(value, 0.1, MAX_VIDEO_SECONDS).toFixed(2));
+        if (durationRange) durationRange.value = String(editor.displaySeconds);
+        if (durationInput) durationInput.value = String(editor.displaySeconds);
+      }
+    };
+    startRange?.addEventListener("input", () => sync("startSeconds", startRange.value));
+    startInput?.addEventListener("input", () => sync("startSeconds", startInput.value));
+    durationRange?.addEventListener("input", () => sync("displaySeconds", durationRange.value));
+    durationInput?.addEventListener("input", () => sync("displaySeconds", durationInput.value));
+    preview?.addEventListener("loadedmetadata", () => {
+      preview.currentTime = editor.startSeconds;
+    });
+  }
+
+  async function saveVideoEditor() {
+    const editor = state.videoEditor;
+    if (!editor) return;
+    const playback = {
+      startSeconds: Number(clampNumber(editor.startSeconds, 0, Math.max(0, editor.durationSeconds - 0.1)).toFixed(2)),
+      durationSeconds: Number(clampNumber(editor.displaySeconds, 0.1, MAX_VIDEO_SECONDS).toFixed(2)),
+    };
+
+    if (editor.source === "pending") {
+      const item = state.selectedFiles[editor.index];
+      if (item) item.playback = playback;
+      closeVideoEditor();
+      showToast("Ο χρόνος του βίντεο ενημερώθηκε.");
+      return;
+    }
+
+    state.pages = state.pages.map((page) => {
+      if (page.id !== editor.pageId) return page;
+      return {
+        ...page,
+        files: page.files.map((file) => (file.id === editor.fileId ? { ...file, playback } : file)),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    savePages();
+    if (githubSettingsReady()) {
+      try {
+        await syncPagesToGithub();
+      } catch (error) {
+        showToast(`Δεν ανέβηκε ο χρόνος στο GitHub: ${error.message}`);
+        return;
+      }
+    }
+    closeVideoEditor();
+    showToast("Ο χρόνος του βίντεο αποθηκεύτηκε.");
   }
 
   function drawImageEditorCanvas() {
@@ -1780,7 +2061,7 @@
         const overlayHtml = renderTextOverlay(page);
         const logoHtml = logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : "";
         target.innerHTML = isVideo
-          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>${overlayHtml}${logoHtml}`
+          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} ${videoPlaybackAttrs(media)} controls playsinline></video>${overlayHtml}${logoHtml}`
           : `<img src="${src}" alt="${escapeHtml(media.name)}" />${overlayHtml}${logoHtml}`;
       } else if (target.dataset.galleryMedia !== undefined) {
         target.outerHTML = isVideo
@@ -1792,6 +2073,7 @@
           : `<img class="thumb" src="${src}" alt="${escapeHtml(media.name)}" />`;
       }
     }
+    bindTimedVideos();
   }
 
   async function renderPublic(slug) {
@@ -1834,7 +2116,7 @@
               <p class="public-description">${escapeHtml(page.description || "Χωρίς περιγραφή.")}</p>
               <div class="public-hero-media">
                 ${video && video.type.startsWith("video/")
-                  ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} controls playsinline></video>`
+                  ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} ${videoPlaybackAttrs(video)} controls playsinline></video>`
                   : `<img src="${thumbnailSrc || videoSrc}" alt="${escapeHtml(thumbnail ? thumbnail.name : page.title)}" />`}
                 ${overlay}
                 ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
@@ -1858,6 +2140,7 @@
       </div>
     `;
     document.getElementById("copyPublic")?.addEventListener("click", () => copyText(pageUrl(page.slug)));
+    bindTimedVideos();
   }
 
   async function init() {
