@@ -1323,6 +1323,10 @@ tr:last-child td {
 }
 
 @media (max-width: 720px) {
+  .logo-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
   .preview-media .video-logo-overlay,
   .public-hero-media .video-logo-overlay {
     top: 8px;
