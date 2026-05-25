@@ -108,6 +108,7 @@
       published: true,
       slugTouched: false,
       logoId: "",
+      logoSize: 18,
       overlayText: "",
       overlaySubtext: "",
     },
@@ -346,6 +347,10 @@
         ${subtext ? `<span>${escapeHtml(subtext)}</span>` : ""}
       </div>
     `;
+  }
+
+  function logoSizePercent(page) {
+    return clampNumber(page?.logoSize ?? 18, 8, 35);
   }
 
   function videoPlaybackAttrs(media) {
@@ -825,10 +830,11 @@
     const logoUrl = logoSrc(config.logo);
     if (logoUrl) {
       const logo = await loadImage(logoUrl);
-      const maxLogoWidth = Math.min(width * 0.18, logo.naturalWidth || logo.width);
-      const logoWidth = Math.max(70, maxLogoWidth);
+      const logoPercent = clampNumber(config.logoSize ?? 18, 8, 35) / 100;
+      const logoWidth = Math.max(48, width * logoPercent);
       const logoHeight = (logo.naturalHeight || logo.height) * (logoWidth / (logo.naturalWidth || logo.width));
-      ctx.drawImage(logo, width - logoWidth - padding, padding, logoWidth, logoHeight);
+      const logoY = Math.max(padding, padding + (Math.max(0, Math.round(width * 0.07) - logoHeight) / 2));
+      ctx.drawImage(logo, width - logoWidth - padding, logoY, logoWidth, logoHeight);
     }
   }
 
@@ -961,6 +967,7 @@
       slug: editing.slug,
       published: editing.published,
       logoId: state.draft.logoId || editing.logo?.id || "",
+      logoSize: state.draft.logoSize || editing.logoSize || 18,
       overlayText: state.draft.overlayText || editing.overlayText || "",
       overlaySubtext: state.draft.overlaySubtext || editing.overlaySubtext || "",
     } : state.draft;
@@ -1028,6 +1035,14 @@
               `).join("")}
             </div>
             <span class="hint">Το λογότυπο αποθηκεύεται για επόμενη χρήση και μπορεί να μπει πάνω σε thumbnail ή στο video player.</span>
+          </div>
+          <div class="field">
+            <label for="logoSize">Μέγεθος λογοτύπου</label>
+            <div class="range-row">
+              <input id="logoSize" type="range" min="8" max="35" step="1" value="${escapeHtml(draft.logoSize || 18)}" />
+              <input class="input range-number" id="logoSizeNumber" type="number" min="8" max="35" step="1" value="${escapeHtml(draft.logoSize || 18)}" />
+            </div>
+            <span class="hint">Ρυθμίζει το πλάτος του λογοτύπου ως ποσοστό της φωτογραφίας/video.</span>
           </div>
           <div class="field">
             <label for="overlayText">Κείμενο επικάλυψης</label>
@@ -1178,7 +1193,14 @@
                     ["9:16", "9:16"],
                     ["4:3", "4:3"],
                     ["3:4", "3:4"],
+                    ["3:3", "3:3"],
                     ["1:1", "1:1"],
+                    ["2:3", "2:3"],
+                    ["3:2", "3:2"],
+                    ["4:5", "4:5"],
+                    ["5:4", "5:4"],
+                    ["21:9", "21:9"],
+                    ["9:21", "9:21"],
                     ["free", "Ελεύθερο με περίγραμμα"],
                   ].map(([value, label]) => `<option value="${value}" ${state.imageEditor.aspect === value ? "selected" : ""}>${label}</option>`).join("")}
                 </select>
@@ -1383,7 +1405,7 @@
               <div class="preview-media" data-preview-video="${escapeHtml(previewMedia ? previewMedia.id : "")}" data-preview-poster="${escapeHtml(thumbnail ? thumbnail.id : "")}">
                 ${overlay}
                 ${video ? `<span class="play-overlay">${icon("play")}</span>` : ""}
-                ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
+                ${logoUrl ? `<img class="video-logo-overlay" style="--logo-size:${escapeHtml(logoSizePercent(page))}%;" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
               <div class="preview-content">
                 <p class="preview-description">${escapeHtml(page.description || "Χωρίς περιγραφή.")}</p>
@@ -1446,6 +1468,8 @@
     const slug = document.getElementById("slug");
     const overlayText = document.getElementById("overlayText");
     const overlaySubtext = document.getElementById("overlaySubtext");
+    const logoSize = document.getElementById("logoSize");
+    const logoSizeNumber = document.getElementById("logoSizeNumber");
     title?.addEventListener("input", () => {
       if (!state.editId) {
         state.draft.title = title.value;
@@ -1466,6 +1490,13 @@
     overlaySubtext?.addEventListener("input", () => {
       state.draft.overlaySubtext = overlaySubtext.value;
     });
+    const syncLogoSize = (value) => {
+      state.draft.logoSize = clampNumber(value, 8, 35);
+      if (logoSize) logoSize.value = String(state.draft.logoSize);
+      if (logoSizeNumber) logoSizeNumber.value = String(state.draft.logoSize);
+    };
+    logoSize?.addEventListener("input", () => syncLogoSize(logoSize.value));
+    logoSizeNumber?.addEventListener("input", () => syncLogoSize(logoSizeNumber.value));
     slug?.addEventListener("input", () => {
       slug.value = slugify(slug.value);
       if (!state.editId) {
@@ -1826,7 +1857,14 @@
       "9:16": [720, 1280],
       "4:3": [1200, 900],
       "3:4": [900, 1200],
+      "3:3": [1000, 1000],
       "1:1": [1000, 1000],
+      "2:3": [800, 1200],
+      "3:2": [1200, 800],
+      "4:5": [960, 1200],
+      "5:4": [1200, 960],
+      "21:9": [1680, 720],
+      "9:21": [720, 1680],
       free: [1280, 720],
     };
     return map[aspect] || map["16:9"];
@@ -1962,6 +2000,7 @@
         state.selectedFiles = [];
         state.uploadErrors = [];
         state.draft.logoId = page?.logo?.id || "";
+        state.draft.logoSize = page?.logoSize || 18;
         state.draft.overlayText = page?.overlayText || "";
         state.draft.overlaySubtext = page?.overlaySubtext || "";
         renderAdmin();
@@ -2060,9 +2099,10 @@
     const published = form.querySelector("#published").checked;
     const selectedLogoId = form.querySelector("#pageLogo")?.value || "";
     const selectedLogo = logoById(selectedLogoId);
+    const logoSize = clampNumber(form.querySelector("#logoSize")?.value || 18, 8, 35);
     const overlayText = form.querySelector("#overlayText")?.value.trim() || "";
     const overlaySubtext = form.querySelector("#overlaySubtext")?.value.trim() || "";
-    const overlayConfig = { logo: selectedLogo, overlayText, overlaySubtext };
+    const overlayConfig = { logo: selectedLogo, logoSize, overlayText, overlaySubtext };
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
     const pairState = selectedVideoThumbnailPairs();
 
@@ -2108,6 +2148,7 @@
             published,
             files: [video, thumbnail],
             logo: selectedLogo,
+            logoSize,
             overlayText,
             overlaySubtext,
             createdAt: new Date().toISOString(),
@@ -2143,6 +2184,7 @@
         published,
         files,
         logo: selectedLogo,
+        logoSize,
         overlayText,
         overlaySubtext,
         createdAt: existing.createdAt,
@@ -2174,6 +2216,7 @@
       published: true,
       slugTouched: false,
       logoId: "",
+      logoSize: 18,
       overlayText: "",
       overlaySubtext: "",
     };
@@ -2199,7 +2242,7 @@
         const posterSrc = poster ? await mediaSrc(poster) : "";
         const logoUrl = logoSrc(page.logo);
         const overlayHtml = renderTextOverlay(page);
-        const logoHtml = logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : "";
+        const logoHtml = logoUrl ? `<img class="video-logo-overlay" style="--logo-size:${escapeHtml(logoSizePercent(page))}%;" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : "";
         target.innerHTML = isVideo
           ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} ${videoPlaybackAttrs(media)} controls playsinline></video>${overlayHtml}${logoHtml}`
           : `<img src="${src}" alt="${escapeHtml(media.name)}" />${overlayHtml}${logoHtml}`;
@@ -2259,7 +2302,7 @@
                   ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} ${videoPlaybackAttrs(video)} controls playsinline></video>`
                   : `<img src="${thumbnailSrc || videoSrc}" alt="${escapeHtml(thumbnail ? thumbnail.name : page.title)}" />`}
                 ${overlay}
-                ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
+                ${logoUrl ? `<img class="video-logo-overlay" style="--logo-size:${escapeHtml(logoSizePercent(page))}%;" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
               ${thumbnail ? `
                 <section class="public-gallery">

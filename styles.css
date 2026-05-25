@@ -622,6 +622,22 @@ textarea {
   line-height: 1.2;
 }
 
+.range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 10px;
+  align-items: center;
+}
+
+.range-row input[type="range"] {
+  width: 100%;
+}
+
+.range-number {
+  height: 38px;
+  padding: 0 8px;
+}
+
 .switch-row {
   display: flex;
   align-items: center;
@@ -935,9 +951,9 @@ tr:last-child td {
   top: 12px;
   right: 12px;
   z-index: 3;
-  width: min(156px, 32%);
+  width: min(220px, var(--logo-size, 18%));
   height: auto;
-  max-height: 88px;
+  max-height: 120px;
   object-fit: contain;
   filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.28));
   pointer-events: none;
@@ -1372,7 +1388,7 @@ tr:last-child td {
   .public-hero-media .video-logo-overlay {
     top: 8px;
     right: 8px;
-    width: min(112px, 30%);
+    width: min(112px, var(--logo-size, 18%));
     max-height: 62px;
   }
 
