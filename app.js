@@ -76,6 +76,7 @@
     selectedId: "",
     selectedFiles: [],
     uploadErrors: [],
+    previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
     editId: null,
     db: null,
     github: loadGithubSettings(),
@@ -332,13 +333,37 @@
     if (!files.length) return "Άδειο";
     const hasVideo = files.some((file) => file.type.startsWith("video/"));
     const hasImage = files.some((file) => file.type.startsWith("image/"));
-    if (hasVideo && hasImage) return "Μικτό";
+    if (hasVideo && hasImage) return "Βίντεο + thumbnail";
     if (hasVideo) return "Βίντεο";
-    return "Φωτογραφίες";
+    return "Thumbnail";
   }
 
   function firstMedia(page) {
     return page.files && page.files.length ? page.files[0] : null;
+  }
+
+  function pageVideo(page) {
+    return page?.files?.find((file) => file.type.startsWith("video/")) || firstMedia(page);
+  }
+
+  function pageThumbnail(page) {
+    return page?.files?.find((file) => file.type.startsWith("image/")) || firstMedia(page);
+  }
+
+  function selectedVideoThumbnailPairs() {
+    const videos = state.selectedFiles.filter((item) => item.kind === "video");
+    const thumbnails = state.selectedFiles.filter((item) => item.kind === "image");
+    const count = Math.min(videos.length, thumbnails.length);
+    return {
+      videos,
+      thumbnails,
+      pairs: Array.from({ length: count }, (_, index) => ({
+        video: videos[index],
+        thumbnail: thumbnails[index],
+      })),
+      missingVideos: Math.max(0, thumbnails.length - videos.length),
+      missingThumbnails: Math.max(0, videos.length - thumbnails.length),
+    };
   }
 
   function pageFileSummary(page) {
@@ -346,7 +371,7 @@
     const media = firstMedia(page);
     const countText = `${count} αρχείο${count === 1 ? "" : "α"}`;
     if (media && media.durationSeconds !== undefined) {
-      return `${countText} · ${formatSeconds(media.durationSeconds)}`;
+      return `1 βίντεο + 1 thumbnail · ${formatSeconds(media.durationSeconds)}`;
     }
     return countText;
   }
@@ -483,7 +508,8 @@
       throw new Error(`${item.name}: το GitHub repo δέχεται έως 100 MB ανά αρχείο.`);
     }
     const stamp = new Date().toISOString().slice(0, 10);
-    const path = `${normalizeFolder(state.github.mediaDir)}/${stamp}/${slug}-${cleanFileName(item.name)}`;
+    const role = item.kind === "image" ? "thumbnail" : "video";
+    const path = `${normalizeFolder(state.github.mediaDir)}/${stamp}/${slug}-${role}-${cleanFileName(item.name)}`;
     const content = await fileToBase64(item.file);
     await uploadGithubFile(path, content, `Add media ${item.name}`);
     return {
@@ -491,6 +517,7 @@
       name: item.name,
       type: item.type,
       size: item.size,
+      kind: item.kind,
       durationSeconds: item.durationSeconds,
       githubPath: path,
       remoteUrl: rawGithubUrl(path),
@@ -603,10 +630,10 @@
           </nav>
         </aside>
         <main class="main">
-          <div class="dashboard-grid">
+          <div class="dashboard-grid ${state.previewOpen ? "" : "preview-closed"}">
             ${renderForm()}
             ${renderPagesList(filtered)}
-            ${renderPreview(selected)}
+            ${state.previewOpen ? renderPreview(selected) : ""}
           </div>
         </main>
       </div>
@@ -618,13 +645,14 @@
 
   function renderForm() {
     const editing = state.pages.find((page) => page.id === state.editId);
-    const batchMode = !editing && state.selectedFiles.length > 1;
+    const pairs = selectedVideoThumbnailPairs();
+    const batchMode = !editing && pairs.pairs.length > 1;
     return `
       <section class="panel form-panel" id="createPanel">
         <div class="panel-header">
           <div>
             <h1 class="panel-title">${editing ? "Επεξεργασία σελίδας" : "Δημιουργία URLs"}</h1>
-            <p class="panel-subtitle">${editing ? "Ενημέρωσε τη σελίδα και το μοναδικό URL της." : "Κάθε αρχείο που ανεβάζεις γίνεται ξεχωριστή σελίδα με δικό του URL."}</p>
+            <p class="panel-subtitle">${editing ? "Ενημέρωσε το βίντεο και το thumbnail της σελίδας." : "Κάθε ζευγάρι βίντεο + thumbnail γίνεται ξεχωριστή σελίδα με δικό του URL."}</p>
           </div>
         </div>
         <form class="form-body" id="pageForm">
@@ -653,7 +681,7 @@
               <span>
                 <span class="empty-icon">${icon("upload")}</span>
                 <p class="drop-title">Σύρε αρχεία εδώ ή <span>κάνε κλικ για επιλογή</span></p>
-                <p class="drop-note">Φωτογραφίες: PNG, JPG, JPEG. Βίντεο: MP4, 3GP, έως 600.00 sec. Για GitHub repo κάθε αρχείο πρέπει να είναι έως 100 MB.</p>
+                <p class="drop-note">Για κάθε σελίδα ανέβασε 1 βίντεο MP4/3GP και 1 thumbnail PNG/JPG/JPEG. Τα ζευγάρια δημιουργούνται με τη σειρά που επιλέγεις τα αρχεία.</p>
               </span>
             </label>
             <div class="media-stack" id="mediaStack">
@@ -671,7 +699,7 @@
               <span></span>
             </label>
           </div>
-          <button class="primary" type="submit" ${state.uploading ? "disabled" : ""}>${state.uploading ? icon("upload") + " Ανεβάζω στο GitHub..." : editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (state.selectedFiles.length > 1 ? "s" : "")}</button>
+          <button class="primary" type="submit" ${state.uploading ? "disabled" : ""}>${state.uploading ? icon("upload") + " Ανεβάζω στο GitHub..." : editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (pairs.pairs.length > 1 ? "s" : "")}</button>
           ${editing ? '<button class="ghost" type="button" id="cancelEdit">Ακύρωση επεξεργασίας</button>' : ""}
         </form>
       </section>
@@ -723,11 +751,13 @@
 
   function renderSelectedFiles(editing) {
     const existing = editing && !state.selectedFiles.length ? editing.files || [] : [];
+    const pairState = selectedVideoThumbnailPairs();
     const pending = state.selectedFiles.map((item, index) => ({
       id: `pending-${index}`,
       name: item.name,
       type: item.type,
       size: item.size,
+      kind: item.kind,
       durationSeconds: item.durationSeconds,
       pendingIndex: index,
     }));
@@ -739,14 +769,14 @@
           <div data-thumb="${escapeHtml(file.id)}" class="thumb-fallback">${icon(file.type.startsWith("video/") ? "video" : "image")}</div>
           <div>
             <p class="file-name">${escapeHtml(file.name)}</p>
-            <p class="file-meta">${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα πάρει δικό του URL" : ""}</p>
+            <p class="file-meta">${escapeHtml(file.kind === "image" ? "thumbnail" : file.kind === "video" ? "video" : mediaKind([file]))} · ${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα μπει σε ζευγάρι" : ""}</p>
           </div>
           ${file.pendingIndex !== undefined ? `<button class="icon-button remove-pending" type="button" data-index="${file.pendingIndex}" title="Αφαίρεση">${icon("x")}</button>` : ""}
         </div>
       `)
       .join("");
-    const pendingNote = state.selectedFiles.length > 1 && !editing
-      ? `<div class="url-note">${state.selectedFiles.length} αρχεία επιλεγμένα: θα δημιουργηθούν ${state.selectedFiles.length} ξεχωριστές σελίδες με ${state.selectedFiles.length} URLs για copy.</div>`
+    const pendingNote = state.selectedFiles.length && !editing
+      ? `<div class="url-note">${pairState.videos.length} βίντεο + ${pairState.thumbnails.length} thumbnails: θα δημιουργηθούν ${pairState.pairs.length} σελίδες. ${pairState.missingThumbnails ? `Λείπουν ${pairState.missingThumbnails} thumbnails.` : ""} ${pairState.missingVideos ? `Λείπουν ${pairState.missingVideos} βίντεο.` : ""}</div>`
       : "";
     return pendingNote + list;
   }
@@ -765,14 +795,14 @@
       <tr data-row="${escapeHtml(page.id)}">
         <td>
           <div class="title-cell">
-            <div data-thumb="${escapeHtml((firstMedia(page) || {}).id || "")}" class="thumb-fallback">${icon(mediaKind(page.files) === "Βίντεο" ? "video" : "image")}</div>
+            <div data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}" class="thumb-fallback">${icon("image")}</div>
             <div>
               <strong>${escapeHtml(page.title)}</strong>
               <span>${escapeHtml(pageFileSummary(page))}</span>
             </div>
           </div>
         </td>
-        <td><span class="type-chip">${icon(mediaKind(page.files) === "Βίντεο" ? "video" : "image")} ${mediaKind(page.files)}</span></td>
+        <td><span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span></td>
         <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
         <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
         <td>
@@ -793,6 +823,7 @@
             <h2 class="panel-title">Οι σελίδες μου (${state.pages.length})</h2>
           </div>
           <div class="table-tools">
+            <button class="secondary" id="togglePreview" type="button">${icon(state.previewOpen ? "chevron" : "eye")} ${state.previewOpen ? "Κλείσιμο προεπισκόπησης" : "Άνοιγμα προεπισκόπησης"}</button>
             <label class="search mini-search">
               ${icon("search")}
               <input id="tableSearch" type="search" value="${escapeHtml(state.search)}" placeholder="Αναζήτηση σελίδων..." />
@@ -836,15 +867,18 @@
 
   function renderPreview(page) {
     const url = page ? pageUrl(page.slug) : "";
-    const media = page ? firstMedia(page) : null;
-    const gallery = page ? page.files.slice(0, 6) : [];
+    const video = page ? pageVideo(page) : null;
+    const thumbnail = page ? pageThumbnail(page) : null;
     return `
       <section class="panel preview-panel">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">Προεπισκόπηση δημόσιας σελίδας</h2>
           </div>
-          ${page ? `<button class="icon-button view-page" data-slug="${escapeHtml(page.slug)}" title="Άνοιγμα">${icon("external")}</button>` : ""}
+          <div class="row-actions">
+            <button class="icon-button" id="closePreview" type="button" title="Κλείσιμο προεπισκόπησης">${icon("chevron")}</button>
+            ${page ? `<button class="icon-button view-page" data-slug="${escapeHtml(page.slug)}" title="Άνοιγμα">${icon("external")}</button>` : ""}
+          </div>
         </div>
         <div class="preview-card">
           ${page ? `
@@ -856,15 +890,13 @@
               <div class="preview-content">
                 <h3 class="preview-title">${escapeHtml(page.title)}</h3>
               </div>
-              <div class="preview-media" data-preview-media="${escapeHtml(media ? media.id : "")}" data-preview-type="${escapeHtml(media ? media.type : "")}">
-                ${media && media.type.startsWith("video/") ? `<span class="play-overlay">${icon("play")}</span>` : ""}
+              <div class="preview-media" data-preview-video="${escapeHtml(video ? video.id : "")}" data-preview-poster="${escapeHtml(thumbnail ? thumbnail.id : "")}">
+                ${video ? `<span class="play-overlay">${icon("play")}</span>` : ""}
               </div>
               <div class="preview-content">
                 <p class="preview-description">${escapeHtml(page.description || "Χωρίς περιγραφή.")}</p>
               </div>
-              <div class="preview-gallery">
-                ${gallery.map((item) => `<div data-gallery-media="${escapeHtml(item.id)}" data-gallery-type="${escapeHtml(item.type)}" class="thumb-fallback">${icon(item.type.startsWith("video/") ? "video" : "image")}</div>`).join("")}
-              </div>
+              ${thumbnail ? `<div class="preview-gallery"><div data-gallery-media="${escapeHtml(thumbnail.id)}" data-gallery-type="${escapeHtml(thumbnail.type)}" class="thumb-fallback">${icon("image")}</div></div>` : ""}
             </article>
             <button class="secondary view-page" data-slug="${escapeHtml(page.slug)}" style="width:100%; margin-top:14px;">Προβολή σε νέα καρτέλα ${icon("external")}</button>
           ` : `
@@ -902,6 +934,8 @@
       clearFormState();
       renderAdmin();
     });
+    document.getElementById("togglePreview")?.addEventListener("click", togglePreview);
+    document.getElementById("closePreview")?.addEventListener("click", togglePreview);
 
     const title = document.getElementById("title");
     const slug = document.getElementById("slug");
@@ -932,6 +966,12 @@
         renderAdmin();
       });
     });
+  }
+
+  function togglePreview() {
+    state.previewOpen = !state.previewOpen;
+    localStorage.setItem("media-pages:preview-open", String(state.previewOpen));
+    renderAdmin();
   }
 
   function bindGithubSettings() {
@@ -1044,7 +1084,8 @@
     if (errors.length) {
       showToast(`${errors.length} αρχείο${errors.length === 1 ? "" : "α"} απορρίφθηκαν. Δες τις λεπτομέρειες κάτω από το upload.`);
     } else {
-      showToast(accepted.length === 1 ? "Το αρχείο είναι έτοιμο για URL." : `${accepted.length} αρχεία είναι έτοιμα για URLs.`);
+      const pairs = selectedVideoThumbnailPairs().pairs.length;
+      showToast(pairs === 0 ? "Πρόσθεσε και το αντίστοιχο βίντεο ή thumbnail." : pairs === 1 ? "Ένα ζευγάρι είναι έτοιμο για URL." : `${pairs} ζευγάρια είναι έτοιμα για URLs.`);
     }
   }
 
@@ -1062,17 +1103,22 @@
     const slugInput = form.querySelector("#slug").value.trim();
     const published = form.querySelector("#published").checked;
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
+    const pairState = selectedVideoThumbnailPairs();
 
     if (existing && !title) {
       showToast("Συμπλήρωσε τίτλο.");
       return;
     }
-    if (existing && state.selectedFiles.length > 1) {
-      showToast("Στην επεξεργασία μπορείς να αντικαταστήσεις με ένα αρχείο.");
+    if (state.selectedFiles.length && (pairState.missingThumbnails || pairState.missingVideos)) {
+      showToast("Κάθε σελίδα χρειάζεται 1 βίντεο και 1 thumbnail.");
       return;
     }
-    if (!existing && !state.selectedFiles.length) {
-      showToast("Ανέβασε τουλάχιστον ένα βίντεο ή μία φωτογραφία.");
+    if (existing && pairState.pairs.length > 1) {
+      showToast("Στην επεξεργασία μπορείς να αντικαταστήσεις με ένα ζευγάρι: 1 βίντεο + 1 thumbnail.");
+      return;
+    }
+    if (!existing && !pairState.pairs.length) {
+      showToast("Ανέβασε τουλάχιστον 1 βίντεο και 1 thumbnail.");
       return;
     }
 
@@ -1082,22 +1128,23 @@
     try {
       if (!existing) {
         const createdPages = [];
-        const total = state.selectedFiles.length;
-        for (const item of state.selectedFiles) {
-          const cleanFileTitle = fileTitle(item.name);
+        const total = pairState.pairs.length;
+        for (const pair of pairState.pairs) {
+          const cleanFileTitle = fileTitle(pair.video.name);
           const pageTitle = total > 1 && title ? `${title} - ${cleanFileTitle}` : title || cleanFileTitle;
           const slugBase = total > 1
             ? `${slugInput || title || ""} ${cleanFileTitle}`
             : slugInput || pageTitle;
           const slug = uniqueSlug(slugBase, null);
-          const media = await uploadMediaToGithub(item, slug);
+          const video = await uploadMediaToGithub(pair.video, slug);
+          const thumbnail = await uploadMediaToGithub(pair.thumbnail, slug);
           const page = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             title: pageTitle,
             description,
             slug,
             published,
-            files: [media],
+            files: [video, thumbnail],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -1116,8 +1163,9 @@
       let files = existing && !state.selectedFiles.length ? existing.files : [];
       if (state.selectedFiles.length) {
         files = [];
-        for (const item of state.selectedFiles) {
-          files.push(await uploadMediaToGithub(item, slug));
+        for (const pair of pairState.pairs) {
+          files.push(await uploadMediaToGithub(pair.video, slug));
+          files.push(await uploadMediaToGithub(pair.thumbnail, slug));
         }
       }
 
@@ -1155,11 +1203,11 @@
   async function hydrateThumbs() {
     const targets = [
       ...document.querySelectorAll("[data-thumb]"),
-      ...document.querySelectorAll("[data-preview-media]"),
+      ...document.querySelectorAll("[data-preview-video]"),
       ...document.querySelectorAll("[data-gallery-media]"),
     ];
     for (const target of targets) {
-      const id = target.dataset.thumb || target.dataset.previewMedia || target.dataset.galleryMedia;
+      const id = target.dataset.thumb || target.dataset.previewVideo || target.dataset.galleryMedia;
       if (!id) continue;
       const page = state.pages.find((item) => item.files.some((file) => file.id === id));
       const media = page?.files.find((file) => file.id === id);
@@ -1167,9 +1215,11 @@
       const src = await mediaSrc(media);
       if (!src) continue;
       const isVideo = media.type.startsWith("video/");
-      if (target.dataset.previewMedia !== undefined) {
+      if (target.dataset.previewVideo !== undefined) {
+        const poster = pageThumbnail(page);
+        const posterSrc = poster ? await mediaSrc(poster) : "";
         target.innerHTML = isVideo
-          ? `<video src="${src}" controls playsinline></video>`
+          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>`
           : `<img src="${src}" alt="${escapeHtml(media.name)}" />`;
       } else if (target.dataset.galleryMedia !== undefined) {
         target.outerHTML = isVideo
@@ -1200,9 +1250,10 @@
       return;
     }
 
-    const media = firstMedia(page);
-    const src = await mediaSrc(media);
-    const gallery = page.files.slice(1);
+    const video = pageVideo(page);
+    const thumbnail = pageThumbnail(page);
+    const videoSrc = await mediaSrc(video);
+    const thumbnailSrc = await mediaSrc(thumbnail);
     app.innerHTML = `
       <div class="public-page">
         <header class="public-header">
@@ -1218,15 +1269,15 @@
               <h1 class="public-title">${escapeHtml(page.title)}</h1>
               <p class="public-description">${escapeHtml(page.description || "Χωρίς περιγραφή.")}</p>
               <div class="public-hero-media">
-                ${media && media.type.startsWith("video/")
-                  ? `<video src="${src}" controls playsinline></video>`
-                  : `<img src="${src}" alt="${escapeHtml(media ? media.name : page.title)}" />`}
+                ${video && video.type.startsWith("video/")
+                  ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} controls playsinline></video>`
+                  : `<img src="${thumbnailSrc || videoSrc}" alt="${escapeHtml(thumbnail ? thumbnail.name : page.title)}" />`}
               </div>
-              ${gallery.length ? `
+              ${thumbnail ? `
                 <section class="public-gallery">
-                  <h2>Περιεχόμενο</h2>
+                  <h2>Thumbnail</h2>
                   <div class="gallery-grid" id="publicGallery">
-                    ${gallery.map((item) => `<div data-public-media="${escapeHtml(item.id)}" class="thumb-fallback">${icon(item.type.startsWith("video/") ? "video" : "image")}</div>`).join("")}
+                    <img src="${thumbnailSrc}" alt="${escapeHtml(thumbnail.name)}" />
                   </div>
                 </section>
               ` : ""}
@@ -1241,14 +1292,6 @@
       </div>
     `;
     document.getElementById("copyPublic")?.addEventListener("click", () => copyText(pageUrl(page.slug)));
-    for (const target of document.querySelectorAll("[data-public-media]")) {
-      const item = page.files.find((file) => file.id === target.dataset.publicMedia);
-      if (!item) continue;
-      const itemSrc = await mediaSrc(item);
-      target.outerHTML = item.type.startsWith("video/")
-        ? `<video src="${itemSrc}" controls playsinline></video>`
-        : `<img src="${itemSrc}" alt="${escapeHtml(item.name)}" />`;
-    }
   }
 
   async function init() {

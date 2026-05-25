@@ -287,6 +287,10 @@ select:focus {
   align-items: start;
 }
 
+.dashboard-grid.preview-closed {
+  grid-template-columns: minmax(270px, 380px) minmax(620px, 1fr);
+}
+
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -646,6 +650,8 @@ textarea {
 .table-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -1076,6 +1082,10 @@ tr:last-child td {
 
 @media (max-width: 1240px) {
   .dashboard-grid {
+    grid-template-columns: 340px minmax(0, 1fr);
+  }
+
+  .dashboard-grid.preview-closed {
     grid-template-columns: 340px minmax(0, 1fr);
   }
 
