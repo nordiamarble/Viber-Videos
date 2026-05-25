@@ -418,6 +418,23 @@
     return `${base}#/p/${slug}`;
   }
 
+  function directMediaUrl(media) {
+    const url = media?.remoteUrl || "";
+    return /^https?:\/\//.test(url) ? url : "";
+  }
+
+  function renderCopyUrlField(label, value, emptyText = "Δεν υπάρχει ακόμα URL") {
+    return `
+      <label class="copy-url-field">
+        <span>${escapeHtml(label)}</span>
+        <div class="url-box">
+          <input readonly value="${escapeHtml(value || emptyText)}" />
+          <button class="icon-button copy-direct-url" type="button" data-url="${escapeHtml(value)}" ${value ? "" : "disabled"} title="Αντιγραφή ${escapeHtml(label)}">${icon("copy")}</button>
+        </div>
+      </label>
+    `;
+  }
+
   function formatBytes(bytes) {
     if (!bytes) return "";
     const units = ["B", "KB", "MB", "GB"];
@@ -916,6 +933,14 @@
                 <input id="logoInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
               </label>
             </div>
+            <div class="logo-choice-grid">
+              ${allLogos().map((logo) => `
+                <button class="logo-choice ${draft.logoId === logo.id ? "selected" : ""}" type="button" data-logo-id="${escapeHtml(logo.id)}" title="${escapeHtml(logo.name)}">
+                  <span class="logo-choice-preview"><img src="${escapeHtml(logoSrc(logo))}" alt="${escapeHtml(logo.name)}" /></span>
+                  <span>${escapeHtml(logo.name)}</span>
+                </button>
+              `).join("")}
+            </div>
             <span class="hint">Το λογότυπο αποθηκεύεται για επόμενη χρήση και μπορεί να μπει πάνω σε thumbnail ή στο video player.</span>
           </div>
           <div class="field">
@@ -1234,6 +1259,8 @@
     const video = page ? pageVideo(page) : null;
     const thumbnail = page ? pageThumbnail(page) : null;
     const previewMedia = video || thumbnail;
+    const videoUrl = directMediaUrl(video);
+    const thumbnailUrl = directMediaUrl(thumbnail);
     const logo = page?.logo;
     const logoUrl = logoSrc(logo);
     const overlay = page ? renderTextOverlay(page) : "";
@@ -1250,9 +1277,10 @@
         </div>
         <div class="preview-card">
           ${page ? `
-            <div class="url-box">
-              <input readonly value="${escapeHtml(url)}" />
-              <button class="icon-button copy-url" data-slug="${escapeHtml(page.slug)}" title="Αντιγραφή URL">${icon("copy")}</button>
+            <div class="direct-url-panel">
+              ${renderCopyUrlField("URL σελίδας", url)}
+              ${renderCopyUrlField("URL βίντεο", videoUrl, "Δεν υπάρχει βίντεο")}
+              ${renderCopyUrlField("URL φωτογραφίας", thumbnailUrl, "Δεν υπάρχει φωτογραφία")}
             </div>
             <article class="public-preview">
               <div class="preview-content">
@@ -1360,6 +1388,14 @@
       state.draft.logoId = event.target.value;
     });
     document.getElementById("logoInput")?.addEventListener("change", addLogoFromInput);
+    document.querySelectorAll(".logo-choice").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.draft.logoId = button.dataset.logoId || "";
+        const select = document.getElementById("pageLogo");
+        if (select) select.value = state.draft.logoId;
+        renderAdmin();
+      });
+    });
 
     bindDropzone();
     bindActions();
@@ -1809,6 +1845,12 @@
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         copyText(pageUrl(button.dataset.slug));
+      });
+    });
+    document.querySelectorAll(".copy-direct-url").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (button.dataset.url) copyText(button.dataset.url);
       });
     });
     document.querySelectorAll(".view-page").forEach((button) => {
