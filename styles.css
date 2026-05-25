@@ -1233,6 +1233,47 @@ tr:last-child td {
   gap: 12px;
 }
 
+.ready-settings-card {
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid rgba(0, 140, 140, 0.22);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.ready-settings-card strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.ready-settings-card span {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.advanced-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.advanced-settings[open] {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
 .settings-grid label,
 .settings-wide {
   display: grid;

@@ -12,6 +12,13 @@
   const MAX_VIDEO_SECONDS = 600;
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
   const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
+  const DEFAULT_GITHUB_SETTINGS = {
+    owner: "nordiamarble",
+    repo: "Viber-Videos",
+    branch: "main",
+    mediaDir: "media",
+    siteBaseUrl: "https://nordiamarble.github.io/Viber-Videos/",
+  };
   const BUILTIN_LOGOS = [
     {
       id: "builtin-dionyssomarble",
@@ -254,11 +261,7 @@
 
   function loadGithubSettings() {
     const defaults = {
-      owner: "",
-      repo: "",
-      branch: "main",
-      mediaDir: "media",
-      siteBaseUrl: "",
+      ...DEFAULT_GITHUB_SETTINGS,
       token: "",
     };
     try {
@@ -274,7 +277,7 @@
       repo: settings.repo.trim(),
       branch: settings.branch.trim() || "main",
       mediaDir: normalizeFolder(settings.mediaDir),
-      siteBaseUrl: settings.siteBaseUrl.trim().replace(/\/+$/g, ""),
+      siteBaseUrl: settings.siteBaseUrl.trim() || DEFAULT_GITHUB_SETTINGS.siteBaseUrl,
       token: settings.token.trim(),
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.github));
@@ -746,6 +749,89 @@
     };
   }
 
+  function hasPhotoOverlay(config) {
+    return Boolean(config?.logo || config?.overlayText || config?.overlaySubtext);
+  }
+
+  async function itemToImageSource(item) {
+    if (item.file) {
+      const url = URL.createObjectURL(item.file);
+      return { url, revoke: () => URL.revokeObjectURL(url) };
+    }
+    if (item.remoteUrl) return { url: item.remoteUrl, revoke: () => {} };
+    return { url: "", revoke: () => {} };
+  }
+
+  async function photoWithOverlay(item, config) {
+    if (!item || item.kind !== "image" || !hasPhotoOverlay(config)) return item;
+    const source = await itemToImageSource(item);
+    if (!source.url) return item;
+    try {
+      const image = await loadImage(source.url);
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      await drawBrandOverlay(ctx, canvas.width, canvas.height, config);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.94));
+      if (!blob) return item;
+      const name = `${fileTitle(item.name)}-overlay.png`;
+      const file = new File([blob], name, { type: "image/png" });
+      return {
+        ...item,
+        file,
+        name,
+        type: "image/png",
+        size: file.size,
+      };
+    } finally {
+      source.revoke();
+    }
+  }
+
+  async function drawBrandOverlay(ctx, width, height, config) {
+    const padding = Math.max(10, Math.round(width * 0.015));
+    const text = String(config.overlayText || "").trim();
+    const subtext = String(config.overlaySubtext || "").trim();
+    if (text || subtext) {
+      const fontSize = Math.max(22, Math.min(64, Math.round(width * 0.034)));
+      ctx.save();
+      ctx.lineJoin = "round";
+      ctx.textBaseline = "top";
+      ctx.font = `900 ${fontSize}px Arial, Helvetica, sans-serif`;
+      ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.16));
+      ctx.strokeStyle = "#1d1d1d";
+      ctx.fillStyle = "#ffffff";
+      const x = padding;
+      let y = padding;
+      if (text) {
+        const safeText = text.slice(0, 90);
+        ctx.strokeText(safeText, x, y);
+        ctx.fillText(safeText, x, y);
+        y += Math.round(fontSize * 1.12);
+      }
+      if (subtext) {
+        const smallSize = Math.max(15, Math.round(fontSize * 0.58));
+        ctx.font = `900 ${smallSize}px Arial, Helvetica, sans-serif`;
+        ctx.lineWidth = Math.max(2, Math.round(smallSize * 0.16));
+        const safeSubtext = subtext.slice(0, 120);
+        ctx.strokeText(safeSubtext, x, y);
+        ctx.fillText(safeSubtext, x, y);
+      }
+      ctx.restore();
+    }
+
+    const logoUrl = logoSrc(config.logo);
+    if (logoUrl) {
+      const logo = await loadImage(logoUrl);
+      const maxLogoWidth = Math.min(width * 0.18, logo.naturalWidth || logo.width);
+      const logoWidth = Math.max(70, maxLogoWidth);
+      const logoHeight = (logo.naturalHeight || logo.height) * (logoWidth / (logo.naturalWidth || logo.width));
+      ctx.drawImage(logo, width - logoWidth - padding, padding, logoWidth, logoHeight);
+    }
+  }
+
   async function syncPagesToGithub() {
     const publicPages = state.pages.filter((page) => !page.id.startsWith("sample-"));
     const json = JSON.stringify({ pages: publicPages, logos: state.logos }, null, 2);
@@ -946,7 +1032,7 @@
           <div class="field">
             <label for="overlayText">Κείμενο επικάλυψης</label>
             <input class="input" id="overlayText" maxlength="90" value="${escapeHtml(draft.overlayText || "")}" placeholder="π.χ. 2616 Bellagio" />
-            <span class="hint">Εμφανίζεται πάνω αριστερά στο βίντεο ή στη φωτογραφία, όπως στο δείγμα.</span>
+            <span class="hint">Εμφανίζεται πάνω αριστερά και μπαίνει μέσα στο αρχείο φωτογραφίας που ανεβαίνει.</span>
           </div>
           <div class="field">
             <label for="overlaySubtext">Μικρό κείμενο επικάλυψης</label>
@@ -977,13 +1063,24 @@
           <div class="settings-modal-head">
             <div>
               <h2>Ρυθμίσεις αποθήκευσης</h2>
-              <p>Αυτό χρειάζεται μόνο μία φορά, για να ξέρει η εφαρμογή σε ποιο GitHub repo θα ανεβάζει τα αρχεία.</p>
+              <p>Το GitHub repo είναι ήδη συμπληρωμένο. Χρειάζεται μόνο το token για να μπορεί ο browser να ανεβάζει αρχεία.</p>
             </div>
             <button class="icon-button" id="closeSettings" type="button" title="Κλείσιμο">${icon("x")}</button>
           </div>
           <div class="settings-status">
-            <span class="status ${githubSettingsReady() ? "live" : "draft"}">${githubSettingsReady() ? "Έτοιμο για upload" : "Δεν έχει ρυθμιστεί"}</span>
+            <span class="status ${githubSettingsReady() ? "live" : "draft"}">${githubSettingsReady() ? "Έτοιμο για upload" : "Λείπει μόνο το token"}</span>
           </div>
+          <div class="ready-settings-card">
+            <strong>Έτοιμη αποθήκευση</strong>
+            <span>${escapeHtml(settings.owner)}/${escapeHtml(settings.repo)} · ${escapeHtml(settings.branch)} · ${escapeHtml(settings.mediaDir)}</span>
+            <span>${escapeHtml(settings.siteBaseUrl)}</span>
+          </div>
+          <label class="settings-wide">
+            <span>GitHub token</span>
+            <input class="input" id="ghToken" type="password" value="${escapeHtml(settings.token)}" placeholder="Βάλε εδώ το token" autocomplete="off" />
+          </label>
+          <details class="advanced-settings">
+            <summary>Προχωρημένες ρυθμίσεις</summary>
           <div class="settings-grid">
             <label>
               <span>GitHub owner</span>
@@ -1006,11 +1103,8 @@
             <span>Δημόσιο URL site</span>
             <input class="input" id="ghSiteBaseUrl" value="${escapeHtml(settings.siteBaseUrl)}" placeholder="https://username.github.io/repo/" />
           </label>
-          <label class="settings-wide">
-            <span>GitHub token</span>
-            <input class="input" id="ghToken" type="password" value="${escapeHtml(settings.token)}" placeholder="Token με Contents: Read and write" autocomplete="off" />
-          </label>
-          <p class="settings-note">Το token μένει μόνο σε αυτόν τον browser και δεν ανεβαίνει στο GitHub.</p>
+          </details>
+          <p class="settings-note">Το token μένει μόνο σε αυτόν τον browser και δεν ανεβαίνει μέσα στο repo.</p>
           <div class="settings-actions">
             <button class="secondary" type="button" id="closeSettingsSecondary">Άκυρο</button>
             <button class="primary" type="button" id="saveGithubSettings">${icon("settings")} Αποθήκευση</button>
@@ -1659,6 +1753,7 @@
   function loadImage(src) {
     return new Promise((resolve, reject) => {
       const image = new Image();
+      if (/^https?:/.test(src)) image.crossOrigin = "anonymous";
       image.onload = () => resolve(image);
       image.onerror = reject;
       image.src = src;
@@ -1827,11 +1922,11 @@
   function bindGithubSettings() {
     document.getElementById("saveGithubSettings")?.addEventListener("click", () => {
       saveGithubSettings({
-        owner: document.getElementById("ghOwner")?.value || "",
-        repo: document.getElementById("ghRepo")?.value || "",
-        branch: document.getElementById("ghBranch")?.value || "main",
-        mediaDir: document.getElementById("ghMediaDir")?.value || "media",
-        siteBaseUrl: document.getElementById("ghSiteBaseUrl")?.value || "",
+        owner: document.getElementById("ghOwner")?.value || DEFAULT_GITHUB_SETTINGS.owner,
+        repo: document.getElementById("ghRepo")?.value || DEFAULT_GITHUB_SETTINGS.repo,
+        branch: document.getElementById("ghBranch")?.value || DEFAULT_GITHUB_SETTINGS.branch,
+        mediaDir: document.getElementById("ghMediaDir")?.value || DEFAULT_GITHUB_SETTINGS.mediaDir,
+        siteBaseUrl: document.getElementById("ghSiteBaseUrl")?.value || DEFAULT_GITHUB_SETTINGS.siteBaseUrl,
         token: document.getElementById("ghToken")?.value || "",
       });
       state.settingsOpen = false;
@@ -1967,6 +2062,7 @@
     const selectedLogo = logoById(selectedLogoId);
     const overlayText = form.querySelector("#overlayText")?.value.trim() || "";
     const overlaySubtext = form.querySelector("#overlaySubtext")?.value.trim() || "";
+    const overlayConfig = { logo: selectedLogo, overlayText, overlaySubtext };
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
     const pairState = selectedVideoThumbnailPairs();
 
@@ -2002,7 +2098,8 @@
             : slugInput || pageTitle;
           const slug = uniqueSlug(slugBase, null);
           const video = await uploadMediaToGithub(pair.video, slug);
-          const thumbnail = await uploadMediaToGithub(pair.thumbnail, slug);
+          const preparedThumbnail = await photoWithOverlay(pair.thumbnail, overlayConfig);
+          const thumbnail = await uploadMediaToGithub(preparedThumbnail, slug);
           const page = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             title: pageTitle,
@@ -2033,7 +2130,8 @@
         files = [];
         for (const pair of pairState.pairs) {
           files.push(await uploadMediaToGithub(pair.video, slug));
-          files.push(await uploadMediaToGithub(pair.thumbnail, slug));
+          const preparedThumbnail = await photoWithOverlay(pair.thumbnail, overlayConfig);
+          files.push(await uploadMediaToGithub(preparedThumbnail, slug));
         }
       }
 
