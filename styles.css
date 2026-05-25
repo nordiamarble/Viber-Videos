@@ -494,6 +494,33 @@ textarea {
   font-size: 12px;
 }
 
+.url-note {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 140, 140, 0.22);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.validation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.validation-error {
+  padding: 10px 12px;
+  border: 1px solid #ffd2c0;
+  border-radius: 7px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
 .switch-row {
   display: flex;
   align-items: center;
@@ -670,11 +697,15 @@ tr:last-child td {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 230px;
+  overflow: hidden;
   color: #33404b;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-actions {

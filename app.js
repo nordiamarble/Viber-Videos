@@ -3,6 +3,10 @@
   const DB_VERSION = 1;
   const STORE = "files";
   const META_KEY = "media-pages:pages";
+  const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+  const MAX_VIDEO_SECONDS = 600;
+  const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
+  const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
 
   const icons = {
     menu: "M4 6h16M4 12h16M4 18h16",
@@ -67,6 +71,7 @@
     search: "",
     selectedId: "",
     selectedFiles: [],
+    uploadErrors: [],
     editId: null,
     db: null,
     objectUrls: new Map(),
@@ -127,6 +132,26 @@
       .slice(0, 70);
   }
 
+  function fileTitle(name) {
+    return String(name || "media")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "media";
+  }
+
+  function uniqueSlug(base, excludeId) {
+    const fallback = `media-${Date.now()}`;
+    const cleanBase = slugify(base) || fallback;
+    let candidate = cleanBase;
+    let counter = 2;
+    while (state.pages.some((page) => page.slug === candidate && page.id !== excludeId)) {
+      candidate = `${cleanBase}-${counter}`;
+      counter += 1;
+    }
+    return candidate;
+  }
+
   function pageUrl(slug) {
     const base = window.location.href.split("#")[0];
     return `${base}#/p/${slug}`;
@@ -144,6 +169,101 @@
     return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`;
   }
 
+  function formatSeconds(seconds) {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds)) return "";
+    return `${seconds.toFixed(2)} sec`;
+  }
+
+  function fileExtension(file) {
+    return String(file.name || "").split(".").pop().toLowerCase();
+  }
+
+  function mediaMeta(media) {
+    const parts = [];
+    if (media.type) parts.push(media.type);
+    if (media.size) parts.push(formatBytes(media.size));
+    if (media.durationSeconds !== undefined) parts.push(`διάρκεια ${formatSeconds(media.durationSeconds)}`);
+    return parts.join(" · ");
+  }
+
+  function getVideoDuration(file) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      const url = URL.createObjectURL(file);
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+        video.removeAttribute("src");
+        video.load();
+      };
+
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        const duration = video.duration;
+        cleanup();
+        if (Number.isFinite(duration)) resolve(duration);
+        else reject(new Error("unknown-duration"));
+      };
+      video.onerror = () => {
+        cleanup();
+        reject(new Error("unreadable-video"));
+      };
+      video.src = url;
+    });
+  }
+
+  async function validateUploadFile(file) {
+    const extension = fileExtension(file);
+    const isImage = IMAGE_EXTENSIONS.has(extension);
+    const isVideo = VIDEO_EXTENSIONS.has(extension);
+
+    if (!isImage && !isVideo) {
+      return {
+        error: `${file.name}: επιτρέπονται μόνο φωτογραφίες png, jpg, jpeg και βίντεο mp4, 3gp.`,
+      };
+    }
+
+    if (isImage) {
+      return {
+        item: {
+          file,
+          name: file.name,
+          type: file.type || `image/${extension === "jpg" ? "jpeg" : extension}`,
+          size: file.size,
+          kind: "image",
+        },
+      };
+    }
+
+    if (file.size > MAX_VIDEO_BYTES) {
+      return {
+        error: `${file.name}: είναι ${formatBytes(file.size)}. Το όριο για βίντεο είναι 200 MB.`,
+      };
+    }
+
+    try {
+      const durationSeconds = await getVideoDuration(file);
+      if (durationSeconds > MAX_VIDEO_SECONDS) {
+        return {
+          error: `${file.name}: διάρκεια ${formatSeconds(durationSeconds)}. Το όριο είναι 600.00 sec.`,
+        };
+      }
+      return {
+        item: {
+          file,
+          name: file.name,
+          type: file.type || `video/${extension}`,
+          size: file.size,
+          kind: "video",
+          durationSeconds,
+        },
+      };
+    } catch {
+      return {
+        error: `${file.name}: δεν μπόρεσα να διαβάσω με ακρίβεια τη διάρκεια, άρα δεν δημιουργείται URL.`,
+      };
+    }
+  }
+
   function mediaKind(files) {
     if (!files.length) return "Άδειο";
     const hasVideo = files.some((file) => file.type.startsWith("video/"));
@@ -155,6 +275,16 @@
 
   function firstMedia(page) {
     return page.files && page.files.length ? page.files[0] : null;
+  }
+
+  function pageFileSummary(page) {
+    const count = page.files.length;
+    const media = firstMedia(page);
+    const countText = `${count} αρχείο${count === 1 ? "" : "α"}`;
+    if (media && media.durationSeconds !== undefined) {
+      return `${countText} · ${formatSeconds(media.durationSeconds)}`;
+    }
+    return countText;
   }
 
   function openDb() {
@@ -314,18 +444,19 @@
 
   function renderForm() {
     const editing = state.pages.find((page) => page.id === state.editId);
+    const batchMode = !editing && state.selectedFiles.length > 1;
     return `
       <section class="panel form-panel" id="createPanel">
         <div class="panel-header">
           <div>
-            <h1 class="panel-title">${editing ? "Επεξεργασία σελίδας" : "Δημιουργία νέας σελίδας"}</h1>
-            <p class="panel-subtitle">Κάθε αποθήκευση δημιουργεί ή ενημερώνει ένα μοναδικό URL.</p>
+            <h1 class="panel-title">${editing ? "Επεξεργασία σελίδας" : "Δημιουργία URLs"}</h1>
+            <p class="panel-subtitle">${editing ? "Ενημέρωσε τη σελίδα και το μοναδικό URL της." : "Κάθε αρχείο που ανεβάζεις γίνεται ξεχωριστή σελίδα με δικό του URL."}</p>
           </div>
         </div>
         <form class="form-body" id="pageForm">
           <div class="field">
-            <label for="title">Τίτλος σελίδας <span class="required">*</span></label>
-            <input class="input" id="title" name="title" required value="${escapeHtml(editing ? editing.title : "")}" />
+            <label for="title">${editing ? "Τίτλος σελίδας" : "Τίτλος ή πρόθεμα"} ${editing ? '<span class="required">*</span>' : ""}</label>
+            <input class="input" id="title" name="title" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.title : "")}" placeholder="${editing ? "" : "Προαιρετικό - αλλιώς θα μπει το όνομα αρχείου"}" />
           </div>
           <div class="field">
             <label for="description">Περιγραφή</label>
@@ -333,26 +464,27 @@
             <span class="hint">Έως 500 χαρακτήρες.</span>
           </div>
           <div class="field">
-            <label for="slug">Slug URL <span class="required">*</span></label>
+            <label for="slug">${batchMode ? "Βάση URL" : "Slug URL"} ${editing ? '<span class="required">*</span>' : ""}</label>
             <div class="slug-row">
               <span class="slug-prefix">${escapeHtml(window.location.href.split("#")[0])}#/p/</span>
-              <input class="input" id="slug" name="slug" required value="${escapeHtml(editing ? editing.slug : "")}" />
+              <input class="input" id="slug" name="slug" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.slug : "")}" placeholder="${batchMode ? "π.χ. viber-video" : "δημιουργείται αυτόματα"}" />
             </div>
-            <span class="hint">Χρησιμοποίησε λατινικούς χαρακτήρες, αριθμούς και παύλες.</span>
+            <span class="hint">${batchMode ? "Για πολλά αρχεία θα προστεθεί αυτόματα το όνομα κάθε αρχείου, ώστε κάθε URL να είναι μοναδικό." : "Μπορείς να το αφήσεις κενό και θα δημιουργηθεί αυτόματα."}</span>
           </div>
           <div class="field">
             <label>Βίντεο ή φωτογραφίες <span class="required">*</span></label>
             <label class="dropzone" id="dropzone">
-              <input id="mediaInput" type="file" accept="image/*,video/*" multiple />
+              <input id="mediaInput" type="file" accept=".png,.jpg,.jpeg,.mp4,.3gp,image/png,image/jpeg,video/mp4,video/3gpp" multiple />
               <span>
                 <span class="empty-icon">${icon("upload")}</span>
                 <p class="drop-title">Σύρε αρχεία εδώ ή <span>κάνε κλικ για επιλογή</span></p>
-                <p class="drop-note">Υποστηρίζονται MP4, MOV, JPG, PNG, GIF, WebP. Τα αρχεία αποθηκεύονται τοπικά στον browser.</p>
+                <p class="drop-note">Φωτογραφίες: PNG, JPG, JPEG. Βίντεο: MP4, 3GP, έως 200 MB και έως 600.00 sec. Η διάρκεια εμφανίζεται ακριβώς σε sec.</p>
               </span>
             </label>
             <div class="media-stack" id="mediaStack">
               ${renderSelectedFiles(editing)}
             </div>
+            ${renderUploadErrors()}
           </div>
           <div class="switch-row">
             <div class="switch-copy">
@@ -364,7 +496,7 @@
               <span></span>
             </label>
           </div>
-          <button class="primary" type="submit">${editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία"}</button>
+          <button class="primary" type="submit">${editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (state.selectedFiles.length > 1 ? "s" : "")}</button>
           ${editing ? '<button class="ghost" type="button" id="cancelEdit">Ακύρωση επεξεργασίας</button>' : ""}
         </form>
       </section>
@@ -373,27 +505,41 @@
 
   function renderSelectedFiles(editing) {
     const existing = editing && !state.selectedFiles.length ? editing.files || [] : [];
-    const pending = state.selectedFiles.map((file, index) => ({
+    const pending = state.selectedFiles.map((item, index) => ({
       id: `pending-${index}`,
-      name: file.name,
-      type: file.type,
-      size: file.size,
+      name: item.name,
+      type: item.type,
+      size: item.size,
+      durationSeconds: item.durationSeconds,
       pendingIndex: index,
     }));
     const files = pending.length ? pending : existing;
     if (!files.length) return "";
-    return files
+    const list = files
       .map((file) => `
         <div class="media-file">
           <div data-thumb="${escapeHtml(file.id)}" class="thumb-fallback">${icon(file.type.startsWith("video/") ? "video" : "image")}</div>
           <div>
             <p class="file-name">${escapeHtml(file.name)}</p>
-            <p class="file-meta">${escapeHtml(file.type || "media")}${file.size ? " · " + formatBytes(file.size) : ""}</p>
+            <p class="file-meta">${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα πάρει δικό του URL" : ""}</p>
           </div>
           ${file.pendingIndex !== undefined ? `<button class="icon-button remove-pending" type="button" data-index="${file.pendingIndex}" title="Αφαίρεση">${icon("x")}</button>` : ""}
         </div>
       `)
       .join("");
+    const pendingNote = state.selectedFiles.length > 1 && !editing
+      ? `<div class="url-note">${state.selectedFiles.length} αρχεία επιλεγμένα: θα δημιουργηθούν ${state.selectedFiles.length} ξεχωριστές σελίδες με ${state.selectedFiles.length} URLs για copy.</div>`
+      : "";
+    return pendingNote + list;
+  }
+
+  function renderUploadErrors() {
+    if (!state.uploadErrors.length) return "";
+    return `
+      <div class="validation-list">
+        ${state.uploadErrors.map((error) => `<div class="validation-error">${escapeHtml(error)}</div>`).join("")}
+      </div>
+    `;
   }
 
   function renderPagesList(pages) {
@@ -404,12 +550,12 @@
             <div data-thumb="${escapeHtml((firstMedia(page) || {}).id || "")}" class="thumb-fallback">${icon(mediaKind(page.files) === "Βίντεο" ? "video" : "image")}</div>
             <div>
               <strong>${escapeHtml(page.title)}</strong>
-              <span>${page.files.length} αρχείο${page.files.length === 1 ? "" : "α"}</span>
+              <span>${escapeHtml(pageFileSummary(page))}</span>
             </div>
           </div>
         </td>
         <td><span class="type-chip">${icon(mediaKind(page.files) === "Βίντεο" ? "video" : "image")} ${mediaKind(page.files)}</span></td>
-        <td><span class="slug-link">/${escapeHtml(page.slug)}</span></td>
+        <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
         <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
         <td>
           <div class="row-actions">
@@ -442,7 +588,7 @@
                 <tr>
                   <th>Τίτλος</th>
                   <th>Τύπος</th>
-                  <th>URL (Slug)</th>
+                  <th>URL</th>
                   <th>Κατάσταση</th>
                   <th>Ενέργειες</th>
                 </tr>
@@ -587,6 +733,7 @@
         event.stopPropagation();
         state.editId = button.dataset.id;
         state.selectedFiles = [];
+        state.uploadErrors = [];
         renderAdmin();
         document.getElementById("createPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
@@ -635,30 +782,46 @@
     dropzone.addEventListener("drop", (event) => addPendingFiles(event.dataTransfer.files));
   }
 
-  function addPendingFiles(fileList) {
-    const accepted = Array.from(fileList || []).filter((file) =>
-      file.type.startsWith("image/") || file.type.startsWith("video/")
-    );
-    state.selectedFiles.push(...accepted);
+  async function addPendingFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+
+    showToast("Ελέγχω τύπο, μέγεθος και διάρκεια...");
+    const accepted = [];
+    const errors = [];
+    for (const file of files) {
+      const result = await validateUploadFile(file);
+      if (result.item) accepted.push(result.item);
+      if (result.error) errors.push(result.error);
+    }
+
+    if (accepted.length) {
+      state.selectedFiles.push(...accepted);
+    }
+    state.uploadErrors = errors;
     renderAdmin();
+    if (errors.length) {
+      showToast(`${errors.length} αρχείο${errors.length === 1 ? "" : "α"} απορρίφθηκαν. Δες τις λεπτομέρειες κάτω από το upload.`);
+    } else {
+      showToast(accepted.length === 1 ? "Το αρχείο είναι έτοιμο για URL." : `${accepted.length} αρχεία είναι έτοιμα για URLs.`);
+    }
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const title = form.title.value.trim();
-    const description = form.description.value.trim();
-    const slug = slugify(form.slug.value || title);
-    const published = form.published.checked;
+    const title = form.querySelector("#title").value.trim();
+    const description = form.querySelector("#description").value.trim();
+    const slugInput = form.querySelector("#slug").value.trim();
+    const published = form.querySelector("#published").checked;
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
-    const duplicate = state.pages.find((page) => page.slug === slug && page.id !== state.editId);
 
-    if (!title || !slug) {
-      showToast("Συμπλήρωσε τίτλο και URL.");
+    if (existing && !title) {
+      showToast("Συμπλήρωσε τίτλο.");
       return;
     }
-    if (duplicate) {
-      showToast("Υπάρχει ήδη σελίδα με αυτό το URL.");
+    if (existing && state.selectedFiles.length > 1) {
+      showToast("Στην επεξεργασία μπορείς να αντικαταστήσεις με ένα αρχείο.");
       return;
     }
     if (!existing && !state.selectedFiles.length) {
@@ -666,6 +829,46 @@
       return;
     }
 
+    if (!existing) {
+      const createdPages = [];
+      const total = state.selectedFiles.length;
+      for (const item of state.selectedFiles) {
+        const file = item.file;
+        const mediaId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const cleanFileTitle = fileTitle(item.name);
+        const pageTitle = total > 1 && title ? `${title} - ${cleanFileTitle}` : title || cleanFileTitle;
+        const slugBase = total > 1
+          ? `${slugInput || title || ""} ${cleanFileTitle}`
+          : slugInput || pageTitle;
+        const page = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          title: pageTitle,
+          description,
+          slug: uniqueSlug(slugBase, null),
+          published,
+          files: [{
+            id: mediaId,
+            name: item.name,
+            type: item.type,
+            size: item.size,
+            durationSeconds: item.durationSeconds,
+          }],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await putFile(mediaId, file);
+        createdPages.push(page);
+      }
+      state.pages = [...createdPages, ...state.pages];
+      state.selectedId = createdPages[0].id;
+      clearFormState();
+      savePages();
+      renderAdmin();
+      showToast(createdPages.length === 1 ? "Δημιουργήθηκε 1 URL." : `Δημιουργήθηκαν ${createdPages.length} URLs.`);
+      return;
+    }
+
+    const slug = uniqueSlug(slugInput || title, existing.id);
     let files = existing && !state.selectedFiles.length ? existing.files : [];
     if (state.selectedFiles.length) {
       if (existing) {
@@ -674,39 +877,43 @@
         }
       }
       files = [];
-      for (const file of state.selectedFiles) {
+      for (const item of state.selectedFiles) {
+        const file = item.file;
         const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         await putFile(id, file);
-        files.push({ id, name: file.name, type: file.type, size: file.size });
+        files.push({
+          id,
+          name: item.name,
+          type: item.type,
+          size: item.size,
+          durationSeconds: item.durationSeconds,
+        });
       }
     }
 
     const page = {
-      id: existing ? existing.id : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: existing.id,
       title,
       description,
       slug,
       published,
       files,
-      createdAt: existing ? existing.createdAt : new Date().toISOString(),
+      createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
     };
 
-    if (existing) {
-      state.pages = state.pages.map((item) => (item.id === page.id ? page : item));
-    } else {
-      state.pages = [page, ...state.pages];
-    }
+    state.pages = state.pages.map((item) => (item.id === page.id ? page : item));
     state.selectedId = page.id;
     clearFormState();
     savePages();
     renderAdmin();
-    showToast(existing ? "Η σελίδα ενημερώθηκε." : "Η σελίδα δημιουργήθηκε.");
+    showToast("Η σελίδα ενημερώθηκε.");
   }
 
   function clearFormState() {
     state.editId = null;
     state.selectedFiles = [];
+    state.uploadErrors = [];
   }
 
   async function hydrateThumbs() {
@@ -790,7 +997,7 @@
             </section>
             <aside class="public-side">
               <h2>Στοιχεία σελίδας</h2>
-              <p>${mediaKind(page.files)} · ${page.files.length} αρχείο${page.files.length === 1 ? "" : "α"}</p>
+              <p>${mediaKind(page.files)} · ${escapeHtml(pageFileSummary(page))}</p>
               <p style="margin-top:10px;">URL: /${escapeHtml(page.slug)}</p>
             </aside>
           </div>
