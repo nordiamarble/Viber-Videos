@@ -622,6 +622,31 @@ textarea {
   line-height: 1.2;
 }
 
+.editor-control-group {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.logo-choice-grid.compact {
+  grid-template-columns: 1fr;
+}
+
+.logo-choice-grid.compact .logo-choice {
+  min-height: 0;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+}
+
+.logo-choice-grid.compact .logo-choice-preview {
+  height: 54px;
+}
+
+.logo-choice-grid.compact .logo-choice-preview img {
+  max-height: 43px;
+}
+
 .range-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 74px;

@@ -353,6 +353,54 @@
     `;
   }
 
+  function renderEditableTextOverlay(page) {
+    const text = String(page?.overlayText || "").trim();
+    const subtext = String(page?.overlaySubtext || "").trim();
+    return `
+      <div class="media-text-overlay editor-live-text-overlay" ${text || subtext ? "" : "hidden"}>
+        <strong>${escapeHtml(text)}</strong>
+        <span>${escapeHtml(subtext)}</span>
+      </div>
+    `;
+  }
+
+  function renderLogoOverlayControls(prefix, selectedLogoId, size, overlayText, overlaySubtext) {
+    return `
+      <div class="editor-control-group">
+        <label>
+          <span>Λογότυπο επικάλυψης</span>
+          <select class="input" id="${prefix}LogoId">
+            <option value="">Χωρίς λογότυπο</option>
+            ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${selectedLogoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
+          </select>
+        </label>
+        <div class="logo-choice-grid compact">
+          ${allLogos().map((logo) => `
+            <button class="logo-choice ${selectedLogoId === logo.id ? "selected" : ""}" type="button" data-editor-prefix="${escapeHtml(prefix)}" data-logo-id="${escapeHtml(logo.id)}" title="${escapeHtml(logo.name)}">
+              <span class="logo-choice-preview"><img src="${escapeHtml(logoSrc(logo))}" alt="${escapeHtml(logo.name)}" /></span>
+              <span>${escapeHtml(logo.name)}</span>
+            </button>
+          `).join("")}
+        </div>
+        <label>
+          <span>Μέγεθος λογοτύπου</span>
+          <div class="range-row">
+            <input id="${prefix}LogoSize" type="range" min="8" max="35" step="1" value="${escapeHtml(size || 18)}" />
+            <input class="input range-number" id="${prefix}LogoSizeNumber" type="number" min="8" max="35" step="1" value="${escapeHtml(size || 18)}" />
+          </div>
+        </label>
+        <label>
+          <span>Κείμενο επικάλυψης</span>
+          <input class="input" id="${prefix}OverlayText" maxlength="90" value="${escapeHtml(overlayText || "")}" placeholder="π.χ. 2616 Bellagio" />
+        </label>
+        <label>
+          <span>Μικρό κείμενο</span>
+          <input class="input" id="${prefix}OverlaySubtext" maxlength="120" value="${escapeHtml(overlaySubtext || "")}" placeholder="π.χ. Premium marble surfaces" />
+        </label>
+      </div>
+    `;
+  }
+
   function logoSizePercent(page) {
     return clampNumber(page?.logoSize ?? 18, 8, 35);
   }
@@ -1221,21 +1269,7 @@
                 <span>Μετακίνηση κάθετα</span>
                 <input id="editOffsetY" type="range" min="-50" max="50" step="1" value="${state.imageEditor.offsetY}" />
               </label>
-              <label>
-                <span>Κείμενο επάνω</span>
-                <input class="input" id="editTopText" value="${escapeHtml(state.imageEditor.topText)}" placeholder="π.χ. Νέο βίντεο" />
-              </label>
-              <label>
-                <span>Λογότυπο / label</span>
-                <input class="input" id="editLogoText" value="${escapeHtml(state.imageEditor.logoText)}" placeholder="π.χ. Brand" />
-              </label>
-              <label>
-                <span>Αποθηκευμένο λογότυπο</span>
-                <select class="input" id="editLogoId">
-                  <option value="">Χωρίς εικόνα λογότυπου</option>
-                  ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${state.imageEditor.logoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
-                </select>
-              </label>
+              ${renderLogoOverlayControls("imageEdit", state.imageEditor.logoId, state.imageEditor.logoSize, state.imageEditor.overlayText, state.imageEditor.overlaySubtext)}
             </div>
           </div>
           <div class="settings-actions">
@@ -1266,7 +1300,7 @@
           <div class="video-editor-layout">
             <div class="video-editor-media">
               <video class="video-editor-preview" src="${escapeHtml(editor.sourceUrl)}" controls playsinline></video>
-              ${renderTextOverlay(editor)}
+              ${renderEditableTextOverlay(editor)}
               ${logoSrc(editor.logo) ? `<img class="video-logo-overlay" style="--logo-size:${escapeHtml(logoSizePercent(editor))}%;" src="${escapeHtml(logoSrc(editor.logo))}" alt="${escapeHtml(editor.logo.name)}" />` : ""}
             </div>
             <div class="editor-controls">
@@ -1284,6 +1318,7 @@
                 Θα παίξει ${formatSeconds(editor.displaySeconds)} από το ${formatSeconds(editor.startSeconds)}.
                 ${loops ? "Επειδή ο χρόνος είναι μεγαλύτερος από το διαθέσιμο κομμάτι, θα κάνει loop." : "Αν μικρύνεις τον χρόνο, θα σταματά εκεί."}
               </div>
+              ${renderLogoOverlayControls("videoEdit", editor.logo?.id || "", editor.logoSize, editor.overlayText, editor.overlaySubtext)}
             </div>
           </div>
           <div class="settings-actions">
@@ -1612,9 +1647,10 @@
       zoom: 1,
       offsetX: 0,
       offsetY: 0,
-      topText: "",
-      logoText: "",
       logoId: state.draft.logoId || "",
+      logoSize: state.draft.logoSize || 18,
+      overlayText: state.draft.overlayText || "",
+      overlaySubtext: state.draft.overlaySubtext || "",
     };
     renderAdmin();
   }
@@ -1693,9 +1729,10 @@
     state.imageEditor.offsetX = 0;
     state.imageEditor.offsetY = 0;
     state.imageEditor.aspect = "16:9";
-    state.imageEditor.topText = "";
-    state.imageEditor.logoText = "";
     state.imageEditor.logoId = state.draft.logoId || "";
+    state.imageEditor.logoSize = state.draft.logoSize || 18;
+    state.imageEditor.overlayText = state.draft.overlayText || "";
+    state.imageEditor.overlaySubtext = state.draft.overlaySubtext || "";
     renderAdmin();
   }
 
@@ -1706,16 +1743,32 @@
       ["editZoom", "zoom", Number],
       ["editOffsetX", "offsetX", Number],
       ["editOffsetY", "offsetY", Number],
-      ["editTopText", "topText", String],
-      ["editLogoText", "logoText", String],
-      ["editLogoId", "logoId", String],
+      ["imageEditOverlayText", "overlayText", String],
+      ["imageEditOverlaySubtext", "overlaySubtext", String],
+      ["imageEditLogoId", "logoId", String],
+      ["imageEditLogoSize", "logoSize", Number],
+      ["imageEditLogoSizeNumber", "logoSize", Number],
     ];
     controls.forEach(([id, key, cast]) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => {
         state.imageEditor[key] = cast(input.value);
+        if (key === "logoSize") {
+          const range = document.getElementById("imageEditLogoSize");
+          const number = document.getElementById("imageEditLogoSizeNumber");
+          const value = String(clampNumber(input.value, 8, 35));
+          if (range) range.value = value;
+          if (number) number.value = value;
+          state.imageEditor.logoSize = Number(value);
+        }
         if (key === "aspect") renderAdmin();
         else drawImageEditorCanvas();
+      });
+    });
+    document.querySelectorAll('[data-editor-prefix="imageEdit"]').forEach((button) => {
+      button.addEventListener("click", () => {
+        state.imageEditor.logoId = button.dataset.logoId || "";
+        renderAdmin();
       });
     });
     bindCropFrameDrag();
@@ -1729,6 +1782,11 @@
     const startInput = document.getElementById("videoStartInput");
     const durationRange = document.getElementById("videoDurationRange");
     const durationInput = document.getElementById("videoDurationInput");
+    const logoSelect = document.getElementById("videoEditLogoId");
+    const logoSizeRange = document.getElementById("videoEditLogoSize");
+    const logoSizeNumber = document.getElementById("videoEditLogoSizeNumber");
+    const overlayText = document.getElementById("videoEditOverlayText");
+    const overlaySubtext = document.getElementById("videoEditOverlaySubtext");
     const sync = (key, value) => {
       if (key === "startSeconds") {
         const maxStart = Math.max(0, Number(editor.durationSeconds || 0) - 0.1);
@@ -1746,6 +1804,43 @@
     startInput?.addEventListener("input", () => sync("startSeconds", startInput.value));
     durationRange?.addEventListener("input", () => sync("displaySeconds", durationRange.value));
     durationInput?.addEventListener("input", () => sync("displaySeconds", durationInput.value));
+    const rerenderVideoEditor = () => renderAdmin();
+    logoSelect?.addEventListener("input", () => {
+      editor.logo = logoById(logoSelect.value);
+      rerenderVideoEditor();
+    });
+    const syncLogoSize = (value) => {
+      editor.logoSize = clampNumber(value, 8, 35);
+      if (logoSizeRange) logoSizeRange.value = String(editor.logoSize);
+      if (logoSizeNumber) logoSizeNumber.value = String(editor.logoSize);
+      const logo = document.querySelector(".video-editor-media .video-logo-overlay");
+      if (logo) logo.style.setProperty("--logo-size", `${editor.logoSize}%`);
+    };
+    logoSizeRange?.addEventListener("input", () => syncLogoSize(logoSizeRange.value));
+    logoSizeNumber?.addEventListener("input", () => syncLogoSize(logoSizeNumber.value));
+    const syncVideoTextOverlay = () => {
+      const layer = document.querySelector(".video-editor-media .editor-live-text-overlay");
+      if (!layer) return;
+      const strong = layer.querySelector("strong");
+      const small = layer.querySelector("span");
+      if (strong) strong.textContent = editor.overlayText || "";
+      if (small) small.textContent = editor.overlaySubtext || "";
+      layer.hidden = !String(editor.overlayText || "").trim() && !String(editor.overlaySubtext || "").trim();
+    };
+    overlayText?.addEventListener("input", () => {
+      editor.overlayText = overlayText.value;
+      syncVideoTextOverlay();
+    });
+    overlaySubtext?.addEventListener("input", () => {
+      editor.overlaySubtext = overlaySubtext.value;
+      syncVideoTextOverlay();
+    });
+    document.querySelectorAll('[data-editor-prefix="videoEdit"]').forEach((button) => {
+      button.addEventListener("click", () => {
+        editor.logo = logoById(button.dataset.logoId || "");
+        rerenderVideoEditor();
+      });
+    });
     preview?.addEventListener("loadedmetadata", () => {
       preview.currentTime = editor.startSeconds;
     });
@@ -1762,8 +1857,12 @@
     if (editor.source === "pending") {
       const item = state.selectedFiles[editor.index];
       if (item) item.playback = playback;
+      state.draft.logoId = editor.logo?.id || "";
+      state.draft.logoSize = editor.logoSize || 18;
+      state.draft.overlayText = editor.overlayText || "";
+      state.draft.overlaySubtext = editor.overlaySubtext || "";
       closeVideoEditor();
-      showToast("Ο χρόνος του βίντεο ενημερώθηκε.");
+      showToast("Το βίντεο και η επικάλυψη ενημερώθηκαν.");
       return;
     }
 
@@ -1772,6 +1871,10 @@
       return {
         ...page,
         files: page.files.map((file) => (file.id === editor.fileId ? { ...file, playback } : file)),
+        logo: editor.logo || null,
+        logoSize: editor.logoSize || 18,
+        overlayText: editor.overlayText || "",
+        overlaySubtext: editor.overlaySubtext || "",
         updatedAt: new Date().toISOString(),
       };
     });
@@ -1830,41 +1933,12 @@
     const y = (height - drawHeight) / 2 + (editor.offsetY / 100) * height;
     ctx.drawImage(image, x, y, drawWidth, drawHeight);
 
-    if (editor.topText.trim()) {
-      ctx.font = "900 58px Arial, sans-serif";
-      ctx.textBaseline = "middle";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = 7;
-      ctx.strokeStyle = "#1d1d1d";
-      ctx.fillStyle = "#ffffff";
-      const text = editor.topText.trim().slice(0, 48);
-      ctx.strokeText(text, 54, 58);
-      ctx.fillText(text, 54, 58);
-    }
-
-    if (editor.logoText.trim()) {
-      const text = editor.logoText.trim().slice(0, 22);
-      ctx.font = "700 34px Arial, sans-serif";
-      const boxWidth = Math.min(width - 80, ctx.measureText(text).width + 56);
-      const boxHeight = 64;
-      const boxX = width - boxWidth - 40;
-      const boxY = height - boxHeight - 36;
-      ctx.fillStyle = "rgba(0, 140, 140, 0.92)";
-      roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 14);
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, boxX + 28, boxY + boxHeight / 2 + 1);
-    }
-
-    const logo = logoById(editor.logoId);
-    const source = logoSrc(logo);
-    if (source) {
-      const logoImage = await loadImage(source);
-      const logoWidth = Math.min(width * 0.2, logoImage.width);
-      const logoHeight = logoImage.height * (logoWidth / logoImage.width);
-      ctx.drawImage(logoImage, width - logoWidth - 40, 36, logoWidth, logoHeight);
-    }
+    await drawBrandOverlay(ctx, width, height, {
+      logo: logoById(editor.logoId),
+      logoSize: editor.logoSize,
+      overlayText: editor.overlayText,
+      overlaySubtext: editor.overlaySubtext,
+    });
   }
 
   function aspectSize(aspect) {
@@ -1914,20 +1988,6 @@
       frame.style.left = `${nextLeft}px`;
       frame.style.top = `${nextTop}px`;
     });
-  }
-
-  function roundRect(ctx, x, y, width, height, radius) {
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-    ctx.lineTo(x + radius, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
   }
 
   async function saveEditedThumbnail() {
