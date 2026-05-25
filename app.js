@@ -76,8 +76,16 @@
     selectedId: "",
     selectedFiles: [],
     uploadErrors: [],
+    draft: {
+      title: "",
+      description: "",
+      slug: "",
+      published: true,
+      slugTouched: false,
+    },
     previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
     settingsOpen: false,
+    imageEditor: null,
     editId: null,
     db: null,
     github: loadGithubSettings(),
@@ -622,14 +630,6 @@
             <div class="avatar">ΑΔ</div>
           </div>
         </header>
-        <aside class="sidebar">
-          <nav class="nav-list" aria-label="Πλοήγηση">
-            <button class="nav-item">${icon("home")} Πίνακας</button>
-            <button class="nav-item active">${icon("plus")} Νέα σελίδα</button>
-            <button class="nav-item">${icon("folder")} Βιβλιοθήκη</button>
-            <button class="nav-item">${icon("settings")} Ρυθμίσεις</button>
-          </nav>
-        </aside>
         <main class="main">
           <div class="dashboard-grid ${state.previewOpen ? "" : "preview-closed"}">
             ${renderForm()}
@@ -643,6 +643,7 @@
         </main>
       </div>
       ${state.settingsOpen ? renderGithubSettingsModal() : ""}
+      ${state.imageEditor ? renderImageEditorModal() : ""}
     `;
 
     bindAdminEvents();
@@ -651,6 +652,12 @@
 
   function renderForm() {
     const editing = state.pages.find((page) => page.id === state.editId);
+    const draft = editing ? {
+      title: editing.title,
+      description: editing.description,
+      slug: editing.slug,
+      published: editing.published,
+    } : state.draft;
     const pairs = selectedVideoThumbnailPairs();
     const batchMode = !editing && pairs.pairs.length > 1;
     return `
@@ -664,18 +671,18 @@
         <form class="form-body" id="pageForm">
           <div class="field">
             <label for="title">${editing ? "Τίτλος σελίδας" : "Τίτλος ή πρόθεμα"} ${editing ? '<span class="required">*</span>' : ""}</label>
-            <input class="input" id="title" name="title" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.title : "")}" placeholder="${editing ? "" : "Προαιρετικό - αλλιώς θα μπει το όνομα αρχείου"}" />
+            <input class="input" id="title" name="title" ${editing ? "required" : ""} value="${escapeHtml(draft.title || "")}" placeholder="${editing ? "" : "Προαιρετικό - αλλιώς θα μπει το όνομα αρχείου"}" />
           </div>
           <div class="field">
             <label for="description">Περιγραφή</label>
-            <textarea id="description" name="description" maxlength="500">${escapeHtml(editing ? editing.description : "")}</textarea>
+            <textarea id="description" name="description" maxlength="500">${escapeHtml(draft.description || "")}</textarea>
             <span class="hint">Έως 500 χαρακτήρες.</span>
           </div>
           <div class="field">
             <label for="slug">${batchMode ? "Βάση URL" : "Slug URL"} ${editing ? '<span class="required">*</span>' : ""}</label>
             <div class="slug-row">
               <span class="slug-prefix">${escapeHtml(window.location.href.split("#")[0])}#/p/</span>
-              <input class="input" id="slug" name="slug" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.slug : "")}" placeholder="${batchMode ? "π.χ. viber-video" : "δημιουργείται αυτόματα"}" />
+              <input class="input" id="slug" name="slug" ${editing ? "required" : ""} value="${escapeHtml(draft.slug || "")}" placeholder="${batchMode ? "π.χ. viber-video" : "δημιουργείται αυτόματα"}" />
             </div>
             <span class="hint">${batchMode ? "Για πολλά αρχεία θα προστεθεί αυτόματα το όνομα κάθε αρχείου, ώστε κάθε URL να είναι μοναδικό." : "Μπορείς να το αφήσεις κενό και θα δημιουργηθεί αυτόματα."}</span>
           </div>
@@ -700,7 +707,7 @@
               <span>Η σελίδα θα είναι διαθέσιμη όταν κάποιος έχει το link.</span>
             </div>
             <label class="switch">
-              <input id="published" type="checkbox" ${editing && !editing.published ? "" : "checked"} />
+              <input id="published" type="checkbox" ${draft.published === false ? "" : "checked"} />
               <span></span>
             </label>
           </div>
@@ -784,7 +791,10 @@
             <p class="file-name">${escapeHtml(file.name)}</p>
             <p class="file-meta">${escapeHtml(file.kind === "image" ? "thumbnail" : file.kind === "video" ? "video" : mediaKind([file]))} · ${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα μπει σε ζευγάρι" : ""}</p>
           </div>
-          ${file.pendingIndex !== undefined ? `<button class="icon-button remove-pending" type="button" data-index="${file.pendingIndex}" title="Αφαίρεση">${icon("x")}</button>` : ""}
+          <div class="media-file-actions">
+            ${file.pendingIndex !== undefined && file.kind === "image" ? `<button class="icon-button edit-thumbnail" type="button" data-index="${file.pendingIndex}" title="Επεξεργασία thumbnail">${icon("edit")}</button>` : ""}
+            ${file.pendingIndex !== undefined ? `<button class="icon-button remove-pending" type="button" data-index="${file.pendingIndex}" title="Αφαίρεση">${icon("x")}</button>` : ""}
+          </div>
         </div>
       `)
       .join("");
@@ -792,6 +802,54 @@
       ? `<div class="url-note">${pairState.videos.length} βίντεο + ${pairState.thumbnails.length} thumbnails: θα δημιουργηθούν ${pairState.pairs.length} σελίδες. ${pairState.missingThumbnails ? `Λείπουν ${pairState.missingThumbnails} thumbnails.` : ""} ${pairState.missingVideos ? `Λείπουν ${pairState.missingVideos} βίντεο.` : ""}</div>`
       : "";
     return pendingNote + list;
+  }
+
+  function renderImageEditorModal() {
+    const item = state.selectedFiles[state.imageEditor.index];
+    return `
+      <div class="modal-backdrop" role="presentation">
+        <section class="image-editor-modal" role="dialog" aria-modal="true" aria-label="Επεξεργασία thumbnail">
+          <div class="settings-modal-head">
+            <div>
+              <h2>Επεξεργασία thumbnail</h2>
+              <p>${escapeHtml(item ? item.name : "")}</p>
+            </div>
+            <button class="icon-button" id="closeImageEditor" type="button" title="Κλείσιμο">${icon("x")}</button>
+          </div>
+          <div class="editor-layout">
+            <div class="editor-canvas-wrap">
+              <canvas id="thumbnailCanvas" width="1280" height="720"></canvas>
+            </div>
+            <div class="editor-controls">
+              <label>
+                <span>Crop zoom</span>
+                <input id="editZoom" type="range" min="1" max="3" step="0.01" value="${state.imageEditor.zoom}" />
+              </label>
+              <label>
+                <span>Μετακίνηση οριζόντια</span>
+                <input id="editOffsetX" type="range" min="-50" max="50" step="1" value="${state.imageEditor.offsetX}" />
+              </label>
+              <label>
+                <span>Μετακίνηση κάθετα</span>
+                <input id="editOffsetY" type="range" min="-50" max="50" step="1" value="${state.imageEditor.offsetY}" />
+              </label>
+              <label>
+                <span>Κείμενο επάνω</span>
+                <input class="input" id="editTopText" value="${escapeHtml(state.imageEditor.topText)}" placeholder="π.χ. Νέο βίντεο" />
+              </label>
+              <label>
+                <span>Λογότυπο / label</span>
+                <input class="input" id="editLogoText" value="${escapeHtml(state.imageEditor.logoText)}" placeholder="π.χ. Brand" />
+              </label>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="secondary" type="button" id="resetImageEditor">Επαναφορά</button>
+            <button class="primary" type="button" id="saveImageEditor">${icon("edit")} Αποθήκευση thumbnail</button>
+          </div>
+        </section>
+      </div>
+    `;
   }
 
   function renderUploadErrors() {
@@ -954,15 +1012,38 @@
     document.getElementById("closeSettingsSecondary")?.addEventListener("click", closeSettings);
     document.getElementById("previewRailToggle")?.addEventListener("click", togglePreview);
     document.getElementById("closePreview")?.addEventListener("click", togglePreview);
+    document.getElementById("closeImageEditor")?.addEventListener("click", closeImageEditor);
+    document.getElementById("resetImageEditor")?.addEventListener("click", resetImageEditor);
+    document.getElementById("saveImageEditor")?.addEventListener("click", saveEditedThumbnail);
 
     const title = document.getElementById("title");
+    const description = document.getElementById("description");
     const slug = document.getElementById("slug");
     title?.addEventListener("input", () => {
-      if (!slug.dataset.touched) slug.value = slugify(title.value);
+      if (!state.editId) {
+        state.draft.title = title.value;
+        if (!state.draft.slugTouched) {
+          state.draft.slug = slugify(title.value);
+          if (slug) slug.value = state.draft.slug;
+        }
+      } else if (!slug.dataset.touched) {
+        slug.value = slugify(title.value);
+      }
+    });
+    description?.addEventListener("input", () => {
+      if (!state.editId) state.draft.description = description.value;
     });
     slug?.addEventListener("input", () => {
-      slug.dataset.touched = "true";
       slug.value = slugify(slug.value);
+      if (!state.editId) {
+        state.draft.slugTouched = true;
+        state.draft.slug = slug.value;
+      } else {
+        slug.dataset.touched = "true";
+      }
+    });
+    document.getElementById("published")?.addEventListener("change", (event) => {
+      if (!state.editId) state.draft.published = event.target.checked;
     });
 
     bindDropzone();
@@ -976,6 +1057,9 @@
         renderAdmin();
       });
     });
+    document.querySelectorAll(".edit-thumbnail").forEach((button) => {
+      button.addEventListener("click", () => openImageEditor(Number(button.dataset.index)));
+    });
 
     document.querySelectorAll("tr[data-row]").forEach((row) => {
       row.addEventListener("click", (event) => {
@@ -984,6 +1068,8 @@
         renderAdmin();
       });
     });
+    bindImageEditorControls();
+    drawImageEditorCanvas();
   }
 
   function togglePreview() {
@@ -995,6 +1081,140 @@
   function closeSettings() {
     state.settingsOpen = false;
     renderAdmin();
+  }
+
+  function openImageEditor(index) {
+    const item = state.selectedFiles[index];
+    if (!item || item.kind !== "image") return;
+    state.imageEditor = {
+      index,
+      previewUrl: URL.createObjectURL(item.file),
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+      topText: "",
+      logoText: "",
+    };
+    renderAdmin();
+  }
+
+  function closeImageEditor() {
+    if (state.imageEditor?.previewUrl) URL.revokeObjectURL(state.imageEditor.previewUrl);
+    state.imageEditor = null;
+    renderAdmin();
+  }
+
+  function resetImageEditor() {
+    if (!state.imageEditor) return;
+    state.imageEditor.zoom = 1;
+    state.imageEditor.offsetX = 0;
+    state.imageEditor.offsetY = 0;
+    state.imageEditor.topText = "";
+    state.imageEditor.logoText = "";
+    renderAdmin();
+  }
+
+  function bindImageEditorControls() {
+    if (!state.imageEditor) return;
+    const controls = [
+      ["editZoom", "zoom", Number],
+      ["editOffsetX", "offsetX", Number],
+      ["editOffsetY", "offsetY", Number],
+      ["editTopText", "topText", String],
+      ["editLogoText", "logoText", String],
+    ];
+    controls.forEach(([id, key, cast]) => {
+      const input = document.getElementById(id);
+      input?.addEventListener("input", () => {
+        state.imageEditor[key] = cast(input.value);
+        drawImageEditorCanvas();
+      });
+    });
+  }
+
+  function drawImageEditorCanvas() {
+    const editor = state.imageEditor;
+    const canvas = document.getElementById("thumbnailCanvas");
+    if (!editor || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    const image = new Image();
+    image.onload = () => {
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#111820";
+      ctx.fillRect(0, 0, width, height);
+
+      const scale = Math.max(width / image.width, height / image.height) * editor.zoom;
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      const x = (width - drawWidth) / 2 + (editor.offsetX / 100) * width;
+      const y = (height - drawHeight) / 2 + (editor.offsetY / 100) * height;
+      ctx.drawImage(image, x, y, drawWidth, drawHeight);
+
+      if (editor.topText.trim()) {
+        ctx.fillStyle = "rgba(10, 17, 20, 0.68)";
+        ctx.fillRect(0, 0, width, 112);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "700 56px Arial, sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.fillText(editor.topText.trim().slice(0, 48), 54, 58);
+      }
+
+      if (editor.logoText.trim()) {
+        const text = editor.logoText.trim().slice(0, 22);
+        ctx.font = "700 34px Arial, sans-serif";
+        const boxWidth = Math.min(width - 80, ctx.measureText(text).width + 56);
+        const boxHeight = 64;
+        const boxX = width - boxWidth - 40;
+        const boxY = height - boxHeight - 36;
+        ctx.fillStyle = "rgba(0, 140, 140, 0.92)";
+        roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 14);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, boxX + 28, boxY + boxHeight / 2 + 1);
+      }
+    };
+    image.src = editor.previewUrl;
+  }
+
+  function roundRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  async function saveEditedThumbnail() {
+    const editor = state.imageEditor;
+    const canvas = document.getElementById("thumbnailCanvas");
+    const original = editor ? state.selectedFiles[editor.index] : null;
+    if (!editor || !canvas || !original) return;
+    drawImageEditorCanvas();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
+    if (!blob) {
+      showToast("Δεν μπόρεσα να αποθηκεύσω το thumbnail.");
+      return;
+    }
+    const name = `${fileTitle(original.name)}-edited.png`;
+    const file = new File([blob], name, { type: "image/png" });
+    state.selectedFiles[editor.index] = {
+      file,
+      name,
+      type: "image/png",
+      size: file.size,
+      kind: "image",
+    };
+    closeImageEditor();
+    showToast("Το thumbnail ενημερώθηκε.");
   }
 
   function bindGithubSettings() {
@@ -1222,6 +1442,13 @@
     state.editId = null;
     state.selectedFiles = [];
     state.uploadErrors = [];
+    state.draft = {
+      title: "",
+      description: "",
+      slug: "",
+      published: true,
+      slugTouched: false,
+    };
   }
 
   async function hydrateThumbs() {
