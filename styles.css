@@ -1157,6 +1157,26 @@ tr:last-child td {
   background: #0b1114;
 }
 
+.video-editor-media {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #0b1114;
+}
+
+.video-editor-media .video-logo-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  width: min(220px, var(--logo-size, 18%));
+  height: auto;
+  max-height: 120px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.28));
+  pointer-events: none;
+}
+
 .editor-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;

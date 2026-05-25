@@ -266,21 +266,25 @@
       token: "",
     };
     try {
-      return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+      return normalizeGithubSettings({ ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") });
     } catch {
       return defaults;
     }
   }
 
-  function saveGithubSettings(settings) {
-    state.github = {
-      owner: settings.owner.trim(),
-      repo: settings.repo.trim(),
-      branch: settings.branch.trim() || "main",
-      mediaDir: normalizeFolder(settings.mediaDir),
-      siteBaseUrl: settings.siteBaseUrl.trim() || DEFAULT_GITHUB_SETTINGS.siteBaseUrl,
-      token: settings.token.trim(),
+  function normalizeGithubSettings(settings) {
+    return {
+      owner: String(settings.owner || DEFAULT_GITHUB_SETTINGS.owner).trim(),
+      repo: String(settings.repo || DEFAULT_GITHUB_SETTINGS.repo).trim(),
+      branch: String(settings.branch || DEFAULT_GITHUB_SETTINGS.branch).trim(),
+      mediaDir: normalizeFolder(settings.mediaDir || DEFAULT_GITHUB_SETTINGS.mediaDir),
+      siteBaseUrl: String(settings.siteBaseUrl || DEFAULT_GITHUB_SETTINGS.siteBaseUrl).trim().replace(/\/+$/g, "") + "/",
+      token: String(settings.token || "").trim(),
     };
+  }
+
+  function saveGithubSettings(settings) {
+    state.github = normalizeGithubSettings(settings);
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.github));
   }
 
@@ -1260,7 +1264,11 @@
             <button class="icon-button" id="closeVideoEditor" type="button" title="Κλείσιμο">${icon("x")}</button>
           </div>
           <div class="video-editor-layout">
-            <video class="video-editor-preview" src="${escapeHtml(editor.sourceUrl)}" controls playsinline></video>
+            <div class="video-editor-media">
+              <video class="video-editor-preview" src="${escapeHtml(editor.sourceUrl)}" controls playsinline></video>
+              ${renderTextOverlay(editor)}
+              ${logoSrc(editor.logo) ? `<img class="video-logo-overlay" style="--logo-size:${escapeHtml(logoSizePercent(editor))}%;" src="${escapeHtml(logoSrc(editor.logo))}" alt="${escapeHtml(editor.logo.name)}" />` : ""}
+            </div>
             <div class="editor-controls">
               <label>
                 <span>Έναρξη στο sec</span>
@@ -1637,6 +1645,10 @@
     const sourceUrl = URL.createObjectURL(item.file);
     state.videoEditor = {
       ...videoEditorFromMedia(item, "pending", { index, sourceUrl }),
+      logo: logoById(state.draft.logoId),
+      logoSize: state.draft.logoSize || 18,
+      overlayText: state.draft.overlayText || "",
+      overlaySubtext: state.draft.overlaySubtext || "",
       originalStartSeconds: 0,
       originalDisplaySeconds: Number((item.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2)),
     };
@@ -1650,6 +1662,10 @@
     const sourceUrl = await mediaSrc(media);
     state.videoEditor = {
       ...videoEditorFromMedia(media, "existing", { pageId: page.id, fileId, sourceUrl }),
+      logo: page.logo || null,
+      logoSize: page.logoSize || 18,
+      overlayText: page.overlayText || "",
+      overlaySubtext: page.overlaySubtext || "",
       originalStartSeconds: 0,
       originalDisplaySeconds: Number((media.durationSeconds || MAX_VIDEO_SECONDS).toFixed(2)),
     };
