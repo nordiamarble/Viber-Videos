@@ -12,6 +12,9 @@
   const MAX_VIDEO_SECONDS = 600;
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
   const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
+  const MOV_EXTENSIONS = new Set(["mov"]);
+  const FFMPEG_ESM_URL = "https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.12.10/esm/index.js";
+  const FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
   const DEFAULT_GITHUB_SETTINGS = {
     owner: "nordiamarble",
     repo: "Viber-Videos",
@@ -101,6 +104,8 @@
     selectedId: "",
     selectedFiles: [],
     uploadErrors: [],
+    uploadStatus: "",
+    processingFiles: false,
     draft: {
       title: "",
       description: "",
@@ -220,8 +225,13 @@
 
   function mediaUploadName(item) {
     const name = item.name || item.file?.name || "media";
-    const extension = fileExtension({ name }) || fileExtension(item.file || {});
-    return fileExtension({ name }) || !extension ? name : `${name}.${extension}`;
+    const fileType = String(item.type || item.file?.type || "");
+    const preferredExtension = fileType === "video/mp4" ? "mp4" : fileType === "video/3gpp" ? "3gp" : "";
+    const extension = preferredExtension || fileExtension({ name }) || fileExtension(item.file || {});
+    const nameExtension = fileExtension({ name });
+    if (!extension) return name;
+    if (preferredExtension && nameExtension !== preferredExtension) return replaceExtension(name, preferredExtension);
+    return nameExtension ? name : `${name}.${extension}`;
   }
 
   function clampNumber(value, min, max) {
@@ -516,11 +526,17 @@
     return String(file.name || "").split(".").pop().toLowerCase();
   }
 
+  function replaceExtension(name, extension) {
+    const cleanName = String(name || "video").replace(/\.[^.]+$/, "");
+    return `${cleanName}.${extension}`;
+  }
+
   function mediaMeta(media) {
     const parts = [];
     if (media.type) parts.push(media.type);
     if (media.size) parts.push(formatBytes(media.size));
     if (media.durationSeconds !== undefined) parts.push(`διάρκεια ${formatSeconds(media.durationSeconds)}`);
+    if (media.convertedFrom) parts.push("μετατροπή από MOV");
     return parts.join(" · ");
   }
 
@@ -549,18 +565,84 @@
     });
   }
 
-  async function validateUploadFile(file) {
+  let ffmpegLoadPromise = null;
+  let ffmpegInstance = null;
+
+  async function toBlobUrl(url, mimeType) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`ffmpeg asset ${response.status}`);
+    const blob = await response.blob();
+    return URL.createObjectURL(new Blob([blob], { type: mimeType }));
+  }
+
+  async function loadFfmpeg(onStatus = () => {}) {
+    if (ffmpegInstance) return ffmpegInstance;
+    if (!ffmpegLoadPromise) {
+      ffmpegLoadPromise = (async () => {
+        onStatus("Φορτώνω τον μετατροπέα MOV → MP4. Αυτό γίνεται μόνο την πρώτη φορά.");
+        const { FFmpeg } = await import(FFMPEG_ESM_URL);
+        const ffmpeg = new FFmpeg();
+        ffmpeg.on("log", ({ message }) => {
+          if (/frame=|time=|speed=/.test(message)) onStatus("Μετατρέπω το MOV σε MP4...");
+        });
+        await ffmpeg.load({
+          coreURL: await toBlobUrl(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.js`, "text/javascript"),
+          wasmURL: await toBlobUrl(`${FFMPEG_CORE_BASE_URL}/ffmpeg-core.wasm`, "application/wasm"),
+        });
+        ffmpegInstance = ffmpeg;
+        return ffmpeg;
+      })().catch((error) => {
+        ffmpegLoadPromise = null;
+        throw error;
+      });
+    }
+    return ffmpegLoadPromise;
+  }
+
+  async function convertMovToMp4(file, onStatus = () => {}) {
+    const ffmpeg = await loadFfmpeg(onStatus);
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const inputName = `input-${stamp}.mov`;
+    const outputName = `output-${stamp}.mp4`;
+    onStatus(`${file.name}: μετατρέπω σε MP4...`);
+    try {
+      await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
+      await ffmpeg.exec([
+        "-i", inputName,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-sn",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "24",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputName,
+      ]);
+      const data = await ffmpeg.readFile(outputName);
+      const blob = new Blob([data], { type: "video/mp4" });
+      return new File([blob], replaceExtension(file.name, "mp4"), { type: "video/mp4" });
+    } finally {
+      await ffmpeg.deleteFile(inputName).catch(() => {});
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+    }
+  }
+
+  async function validateUploadFile(file, onStatus = () => {}) {
     const extension = fileExtension(file);
     const isImage = IMAGE_EXTENSIONS.has(extension);
     const isVideo = VIDEO_EXTENSIONS.has(extension);
+    const isMov = MOV_EXTENSIONS.has(extension);
 
-    if (!isImage && !isVideo) {
+    if (!isImage && !isVideo && !isMov) {
       return {
-        error: `${file.name}: επιτρέπονται μόνο φωτογραφίες png, jpg, jpeg και βίντεο mp4, 3gp.`,
+        error: `${file.name}: επιτρέπονται μόνο φωτογραφίες png, jpg, jpeg και βίντεο mp4, 3gp, mov.`,
       };
     }
 
-    if (file.size > MAX_GITHUB_BYTES) {
+    if (!isMov && file.size > MAX_GITHUB_BYTES) {
       return {
         error: `${file.name}: είναι ${formatBytes(file.size)}. Για αποθήκευση σε κανονικό GitHub repo το όριο είναι 100 MB ανά αρχείο.`,
       };
@@ -585,7 +667,13 @@
     }
 
     try {
-      const durationSeconds = await getVideoDuration(file);
+      const videoFile = isMov ? await convertMovToMp4(file, onStatus) : file;
+      if (videoFile.size > MAX_GITHUB_BYTES) {
+        return {
+          error: `${file.name}: μετά τη μετατροπή έγινε ${formatBytes(videoFile.size)}. Το GitHub δέχεται μέχρι 100 MB ανά αρχείο.`,
+        };
+      }
+      const durationSeconds = await getVideoDuration(videoFile);
       if (durationSeconds > MAX_VIDEO_SECONDS) {
         return {
           error: `${file.name}: διάρκεια ${formatSeconds(durationSeconds)}. Το όριο είναι 600.00 sec.`,
@@ -593,17 +681,18 @@
       }
       return {
         item: {
-          file,
-          name: file.name,
-          type: file.type || `video/${extension}`,
-          size: file.size,
+          file: videoFile,
+          name: videoFile.name,
+          type: videoFile.type || "video/mp4",
+          size: videoFile.size,
           kind: "video",
           durationSeconds,
+          convertedFrom: isMov ? file.name : "",
         },
       };
     } catch {
       return {
-        error: `${file.name}: δεν μπόρεσα να διαβάσω με ακρίβεια τη διάρκεια, άρα δεν δημιουργείται URL.`,
+        error: `${file.name}: δεν μπόρεσα να το μετατρέψω/διαβάσω με ακρίβεια, άρα δεν δημιουργείται URL.`,
       };
     }
   }
@@ -1054,13 +1143,14 @@
           <div class="field">
             <label>Βίντεο ή φωτογραφίες <span class="required">*</span></label>
             <label class="dropzone" id="dropzone">
-              <input id="mediaInput" type="file" accept=".png,.jpg,.jpeg,.mp4,.3gp,image/png,image/jpeg,video/mp4,video/3gpp" multiple />
+              <input id="mediaInput" type="file" accept=".png,.jpg,.jpeg,.mp4,.3gp,.mov,image/png,image/jpeg,video/mp4,video/3gpp,video/quicktime" ${state.processingFiles ? "disabled" : ""} multiple />
               <span>
                 <span class="empty-icon">${icon("upload")}</span>
                 <p class="drop-title">Σύρε αρχεία εδώ ή <span>κάνε κλικ για επιλογή</span></p>
-                <p class="drop-note">Για κάθε σελίδα ανέβασε 1 βίντεο MP4/3GP και 1 thumbnail PNG/JPG/JPEG. Τα ζευγάρια δημιουργούνται με τη σειρά που επιλέγεις τα αρχεία.</p>
+                <p class="drop-note">Για κάθε σελίδα ανέβασε 1 βίντεο MP4/3GP/MOV και 1 thumbnail PNG/JPG/JPEG. Τα MOV μετατρέπονται αυτόματα σε MP4 πριν ανέβουν.</p>
               </span>
             </label>
+            ${state.uploadStatus ? `<div class="url-note">${escapeHtml(state.uploadStatus)}</div>` : ""}
             <div class="media-stack" id="mediaStack">
               ${renderSelectedFiles(editing)}
             </div>
@@ -1115,7 +1205,7 @@
               <span></span>
             </label>
           </div>
-          <button class="primary" type="submit" ${state.uploading ? "disabled" : ""}>${state.uploading ? icon("upload") + " Ανεβάζω στο GitHub..." : editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (pairs.pairs.length > 1 ? "s" : "")}</button>
+          <button class="primary" type="submit" ${state.uploading || state.processingFiles ? "disabled" : ""}>${state.uploading ? icon("upload") + " Ανεβάζω στο GitHub..." : state.processingFiles ? icon("upload") + " Μετατρέπω αρχεία..." : editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (pairs.pairs.length > 1 ? "s" : "")}</button>
           ${editing ? '<button class="ghost" type="button" id="cancelEdit">Ακύρωση επεξεργασίας</button>' : ""}
         </form>
       </section>
@@ -2137,14 +2227,30 @@
   async function addPendingFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    if (state.processingFiles) {
+      showToast("Περίμενε να τελειώσει πρώτα η τρέχουσα μετατροπή.");
+      return;
+    }
 
+    const setUploadStatus = (message) => {
+      state.uploadStatus = message;
+      renderAdmin();
+    };
+    state.processingFiles = true;
+    state.uploadErrors = [];
+    setUploadStatus("Ελέγχω τύπο, μέγεθος και διάρκεια...");
     showToast("Ελέγχω τύπο, μέγεθος και διάρκεια...");
     const accepted = [];
     const errors = [];
-    for (const file of files) {
-      const result = await validateUploadFile(file);
-      if (result.item) accepted.push(result.item);
-      if (result.error) errors.push(result.error);
+    try {
+      for (const file of files) {
+        const result = await validateUploadFile(file, setUploadStatus);
+        if (result.item) accepted.push(result.item);
+        if (result.error) errors.push(result.error);
+      }
+    } finally {
+      state.processingFiles = false;
+      state.uploadStatus = "";
     }
 
     if (accepted.length) {
@@ -2164,6 +2270,10 @@
     event.preventDefault();
     if (!githubSettingsReady()) {
       showToast("Συμπλήρωσε πρώτα τις ρυθμίσεις GitHub.");
+      return;
+    }
+    if (state.processingFiles) {
+      showToast("Περίμενε να τελειώσει πρώτα η μετατροπή/ο έλεγχος αρχείων.");
       return;
     }
     if (state.uploading) return;
