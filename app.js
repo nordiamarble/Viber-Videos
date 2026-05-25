@@ -3,7 +3,11 @@
   const DB_VERSION = 1;
   const STORE = "files";
   const META_KEY = "media-pages:pages";
+  const SETTINGS_KEY = "media-pages:github-settings";
+  const INDEX_PATH = "data/pages.json";
+  const GITHUB_API_VERSION = "2022-11-28";
   const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+  const MAX_GITHUB_BYTES = 100 * 1024 * 1024;
   const MAX_VIDEO_SECONDS = 600;
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
   const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
@@ -74,6 +78,8 @@
     uploadErrors: [],
     editId: null,
     db: null,
+    github: loadGithubSettings(),
+    uploading: false,
     objectUrls: new Map(),
   };
 
@@ -152,8 +158,60 @@
     return candidate;
   }
 
+  function normalizeFolder(value) {
+    return String(value || "media")
+      .trim()
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/\/+/g, "/") || "media";
+  }
+
+  function cleanFileName(name) {
+    const extension = fileExtension({ name });
+    const base = String(name || "media")
+      .replace(/\.[^.]+$/, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 70) || "media";
+    return extension ? `${base}.${extension}` : base;
+  }
+
+  function githubSettingsReady() {
+    const settings = state.github;
+    return Boolean(settings.owner && settings.repo && settings.branch && settings.token);
+  }
+
+  function loadGithubSettings() {
+    const defaults = {
+      owner: "",
+      repo: "",
+      branch: "main",
+      mediaDir: "media",
+      siteBaseUrl: "",
+      token: "",
+    };
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+    } catch {
+      return defaults;
+    }
+  }
+
+  function saveGithubSettings(settings) {
+    state.github = {
+      owner: settings.owner.trim(),
+      repo: settings.repo.trim(),
+      branch: settings.branch.trim() || "main",
+      mediaDir: normalizeFolder(settings.mediaDir),
+      siteBaseUrl: settings.siteBaseUrl.trim().replace(/\/+$/g, ""),
+      token: settings.token.trim(),
+    };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.github));
+  }
+
   function pageUrl(slug) {
-    const base = window.location.href.split("#")[0];
+    const base = state.github.siteBaseUrl || window.location.href.split("#")[0];
     return `${base}#/p/${slug}`;
   }
 
@@ -219,6 +277,12 @@
     if (!isImage && !isVideo) {
       return {
         error: `${file.name}: επιτρέπονται μόνο φωτογραφίες png, jpg, jpeg και βίντεο mp4, 3gp.`,
+      };
+    }
+
+    if (file.size > MAX_GITHUB_BYTES) {
+      return {
+        error: `${file.name}: είναι ${formatBytes(file.size)}. Για αποθήκευση σε κανονικό GitHub repo το όριο είναι 100 MB ανά αρχείο.`,
       };
     }
 
@@ -345,6 +409,116 @@
     localStorage.setItem(META_KEY, JSON.stringify(state.pages));
   }
 
+  async function githubRequest(path, options = {}) {
+    const { owner, repo, token } = state.github;
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        ...(options.headers || {}),
+      },
+    });
+    if (response.status === 404 && (!options.method || options.method === "GET")) return null;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.message || `GitHub error ${response.status}`);
+    }
+    return payload;
+  }
+
+  async function getGithubFileSha(path) {
+    const payload = await githubRequest(`/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(state.github.branch)}`);
+    return payload && payload.sha ? payload.sha : null;
+  }
+
+  function encodeURIComponentPath(path) {
+    return path.split("/").map(encodeURIComponent).join("/");
+  }
+
+  function rawGithubUrl(path) {
+    const { owner, repo, branch } = state.github;
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  }
+
+  async function fileToBase64(file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function textToBase64(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function uploadGithubFile(path, contentBase64, message) {
+    const sha = await getGithubFileSha(path);
+    const body = {
+      message,
+      content: contentBase64,
+      branch: state.github.branch,
+    };
+    if (sha) body.sha = sha;
+    const payload = await githubRequest(`/contents/${encodeURIComponentPath(path)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return payload.content;
+  }
+
+  async function uploadMediaToGithub(item, slug) {
+    if (item.size > MAX_GITHUB_BYTES) {
+      throw new Error(`${item.name}: το GitHub repo δέχεται έως 100 MB ανά αρχείο.`);
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    const path = `${normalizeFolder(state.github.mediaDir)}/${stamp}/${slug}-${cleanFileName(item.name)}`;
+    const content = await fileToBase64(item.file);
+    await uploadGithubFile(path, content, `Add media ${item.name}`);
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: item.name,
+      type: item.type,
+      size: item.size,
+      durationSeconds: item.durationSeconds,
+      githubPath: path,
+      remoteUrl: rawGithubUrl(path),
+    };
+  }
+
+  async function syncPagesToGithub() {
+    const publicPages = state.pages.filter((page) => !page.id.startsWith("sample-"));
+    const json = JSON.stringify({ pages: publicPages }, null, 2);
+    await uploadGithubFile(INDEX_PATH, await textToBase64(json), "Update media pages index");
+  }
+
+  async function tryLoadPublishedPages() {
+    if (window.location.protocol === "file:") return;
+    try {
+      const response = await fetch(`./${INDEX_PATH}?v=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!Array.isArray(payload.pages)) return;
+      const byId = new Map(state.pages.map((page) => [page.id, page]));
+      payload.pages.forEach((page) => byId.set(page.id, page));
+      state.pages = Array.from(byId.values());
+      savePages();
+    } catch {
+      // The public index exists only after the first GitHub sync.
+    }
+  }
+
   async function mediaSrc(media) {
     if (!media) return "";
     if (media.remoteUrl) return media.remoteUrl;
@@ -454,6 +628,7 @@
           </div>
         </div>
         <form class="form-body" id="pageForm">
+          ${renderGithubSettings()}
           <div class="field">
             <label for="title">${editing ? "Τίτλος σελίδας" : "Τίτλος ή πρόθεμα"} ${editing ? '<span class="required">*</span>' : ""}</label>
             <input class="input" id="title" name="title" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.title : "")}" placeholder="${editing ? "" : "Προαιρετικό - αλλιώς θα μπει το όνομα αρχείου"}" />
@@ -478,7 +653,7 @@
               <span>
                 <span class="empty-icon">${icon("upload")}</span>
                 <p class="drop-title">Σύρε αρχεία εδώ ή <span>κάνε κλικ για επιλογή</span></p>
-                <p class="drop-note">Φωτογραφίες: PNG, JPG, JPEG. Βίντεο: MP4, 3GP, έως 200 MB και έως 600.00 sec. Η διάρκεια εμφανίζεται ακριβώς σε sec.</p>
+                <p class="drop-note">Φωτογραφίες: PNG, JPG, JPEG. Βίντεο: MP4, 3GP, έως 600.00 sec. Για GitHub repo κάθε αρχείο πρέπει να είναι έως 100 MB.</p>
               </span>
             </label>
             <div class="media-stack" id="mediaStack">
@@ -496,9 +671,52 @@
               <span></span>
             </label>
           </div>
-          <button class="primary" type="submit">${editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (state.selectedFiles.length > 1 ? "s" : "")}</button>
+          <button class="primary" type="submit" ${state.uploading ? "disabled" : ""}>${state.uploading ? icon("upload") + " Ανεβάζω στο GitHub..." : editing ? icon("edit") + " Αποθήκευση" : icon("plus") + " Δημιουργία URL" + (state.selectedFiles.length > 1 ? "s" : "")}</button>
           ${editing ? '<button class="ghost" type="button" id="cancelEdit">Ακύρωση επεξεργασίας</button>' : ""}
         </form>
+      </section>
+    `;
+  }
+
+  function renderGithubSettings() {
+    const settings = state.github;
+    return `
+      <section class="github-settings" aria-label="Ρυθμίσεις GitHub">
+        <div class="github-settings-head">
+          <div>
+            <h2>Αποθήκευση στο GitHub</h2>
+            <p>Τα αρχεία ανεβαίνουν στο repo και τα δημόσια στοιχεία γράφονται στο ${INDEX_PATH}.</p>
+          </div>
+          <span class="status ${githubSettingsReady() ? "live" : "draft"}">${githubSettingsReady() ? "Έτοιμο" : "Χρειάζεται ρύθμιση"}</span>
+        </div>
+        <div class="github-grid">
+          <label>
+            <span>Owner</span>
+            <input class="input" id="ghOwner" value="${escapeHtml(settings.owner)}" placeholder="username ή org" />
+          </label>
+          <label>
+            <span>Repo</span>
+            <input class="input" id="ghRepo" value="${escapeHtml(settings.repo)}" placeholder="repo-name" />
+          </label>
+          <label>
+            <span>Branch</span>
+            <input class="input" id="ghBranch" value="${escapeHtml(settings.branch)}" placeholder="main" />
+          </label>
+          <label>
+            <span>Media folder</span>
+            <input class="input" id="ghMediaDir" value="${escapeHtml(settings.mediaDir)}" placeholder="media" />
+          </label>
+        </div>
+        <label class="github-wide">
+          <span>GitHub Pages URL</span>
+          <input class="input" id="ghSiteBaseUrl" value="${escapeHtml(settings.siteBaseUrl)}" placeholder="https://username.github.io/repo/" />
+        </label>
+        <label class="github-wide">
+          <span>Fine-grained token</span>
+          <input class="input" id="ghToken" type="password" value="${escapeHtml(settings.token)}" placeholder="Token με Contents: Read and write" autocomplete="off" />
+        </label>
+        <p class="github-note">Το token μένει μόνο σε αυτόν τον browser. Μην δημοσιεύσεις ποτέ το token μέσα στο repo.</p>
+        <button class="secondary" type="button" id="saveGithubSettings">${icon("settings")} Αποθήκευση GitHub ρυθμίσεων</button>
       </section>
     `;
   }
@@ -697,6 +915,7 @@
 
     bindDropzone();
     bindActions();
+    bindGithubSettings();
 
     document.getElementById("pageForm")?.addEventListener("submit", handleSubmit);
     document.querySelectorAll(".remove-pending").forEach((button) => {
@@ -712,6 +931,21 @@
         state.selectedId = row.dataset.row;
         renderAdmin();
       });
+    });
+  }
+
+  function bindGithubSettings() {
+    document.getElementById("saveGithubSettings")?.addEventListener("click", () => {
+      saveGithubSettings({
+        owner: document.getElementById("ghOwner")?.value || "",
+        repo: document.getElementById("ghRepo")?.value || "",
+        branch: document.getElementById("ghBranch")?.value || "main",
+        mediaDir: document.getElementById("ghMediaDir")?.value || "media",
+        siteBaseUrl: document.getElementById("ghSiteBaseUrl")?.value || "",
+        token: document.getElementById("ghToken")?.value || "",
+      });
+      renderAdmin();
+      showToast("Οι ρυθμίσεις GitHub αποθηκεύτηκαν.");
     });
   }
 
@@ -752,6 +986,13 @@
         if (state.selectedId === page.id) state.selectedId = state.pages[0]?.id || "";
         if (state.editId === page.id) clearFormState();
         savePages();
+        if (githubSettingsReady()) {
+          try {
+            await syncPagesToGithub();
+          } catch (error) {
+            showToast(`Η τοπική λίστα ενημερώθηκε, αλλά το GitHub index όχι: ${error.message}`);
+          }
+        }
         renderAdmin();
         showToast("Η σελίδα διαγράφηκε.");
       });
@@ -809,6 +1050,12 @@
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!githubSettingsReady()) {
+      showToast("Συμπλήρωσε πρώτα τις ρυθμίσεις GitHub.");
+      return;
+    }
+    if (state.uploading) return;
+
     const form = event.currentTarget;
     const title = form.querySelector("#title").value.trim();
     const description = form.querySelector("#description").value.trim();
@@ -829,85 +1076,74 @@
       return;
     }
 
-    if (!existing) {
-      const createdPages = [];
-      const total = state.selectedFiles.length;
-      for (const item of state.selectedFiles) {
-        const file = item.file;
-        const mediaId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const cleanFileTitle = fileTitle(item.name);
-        const pageTitle = total > 1 && title ? `${title} - ${cleanFileTitle}` : title || cleanFileTitle;
-        const slugBase = total > 1
-          ? `${slugInput || title || ""} ${cleanFileTitle}`
-          : slugInput || pageTitle;
-        const page = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          title: pageTitle,
-          description,
-          slug: uniqueSlug(slugBase, null),
-          published,
-          files: [{
-            id: mediaId,
-            name: item.name,
-            type: item.type,
-            size: item.size,
-            durationSeconds: item.durationSeconds,
-          }],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await putFile(mediaId, file);
-        createdPages.push(page);
-      }
-      state.pages = [...createdPages, ...state.pages];
-      state.selectedId = createdPages[0].id;
-      clearFormState();
-      savePages();
-      renderAdmin();
-      showToast(createdPages.length === 1 ? "Δημιουργήθηκε 1 URL." : `Δημιουργήθηκαν ${createdPages.length} URLs.`);
-      return;
-    }
+    state.uploading = true;
+    renderAdmin();
 
-    const slug = uniqueSlug(slugInput || title, existing.id);
-    let files = existing && !state.selectedFiles.length ? existing.files : [];
-    if (state.selectedFiles.length) {
-      if (existing) {
-        for (const file of existing.files || []) {
-          if (!file.remoteUrl) await deleteFile(file.id);
+    try {
+      if (!existing) {
+        const createdPages = [];
+        const total = state.selectedFiles.length;
+        for (const item of state.selectedFiles) {
+          const cleanFileTitle = fileTitle(item.name);
+          const pageTitle = total > 1 && title ? `${title} - ${cleanFileTitle}` : title || cleanFileTitle;
+          const slugBase = total > 1
+            ? `${slugInput || title || ""} ${cleanFileTitle}`
+            : slugInput || pageTitle;
+          const slug = uniqueSlug(slugBase, null);
+          const media = await uploadMediaToGithub(item, slug);
+          const page = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            title: pageTitle,
+            description,
+            slug,
+            published,
+            files: [media],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          createdPages.push(page);
+        }
+        state.pages = [...createdPages, ...state.pages];
+        state.selectedId = createdPages[0].id;
+        savePages();
+        await syncPagesToGithub();
+        clearFormState();
+        showToast(createdPages.length === 1 ? "Δημιουργήθηκε 1 GitHub URL." : `Δημιουργήθηκαν ${createdPages.length} GitHub URLs.`);
+        return;
+      }
+
+      const slug = uniqueSlug(slugInput || title, existing.id);
+      let files = existing && !state.selectedFiles.length ? existing.files : [];
+      if (state.selectedFiles.length) {
+        files = [];
+        for (const item of state.selectedFiles) {
+          files.push(await uploadMediaToGithub(item, slug));
         }
       }
-      files = [];
-      for (const item of state.selectedFiles) {
-        const file = item.file;
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        await putFile(id, file);
-        files.push({
-          id,
-          name: item.name,
-          type: item.type,
-          size: item.size,
-          durationSeconds: item.durationSeconds,
-        });
-      }
+
+      const page = {
+        id: existing.id,
+        title,
+        description,
+        slug,
+        published,
+        files,
+        createdAt: existing.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+
+      state.pages = state.pages.map((item) => (item.id === page.id ? page : item));
+      state.selectedId = page.id;
+      savePages();
+      await syncPagesToGithub();
+      clearFormState();
+      showToast("Η σελίδα ενημερώθηκε στο GitHub.");
+    } catch (error) {
+      showToast(`GitHub upload error: ${error.message}`);
+    } finally {
+      state.uploading = false;
+      renderAdmin();
     }
-
-    const page = {
-      id: existing.id,
-      title,
-      description,
-      slug,
-      published,
-      files,
-      createdAt: existing.createdAt,
-      updatedAt: new Date().toISOString(),
-    };
-
-    state.pages = state.pages.map((item) => (item.id === page.id ? page : item));
-    state.selectedId = page.id;
-    clearFormState();
-    savePages();
-    renderAdmin();
-    showToast("Η σελίδα ενημερώθηκε.");
   }
 
   function clearFormState() {
@@ -1018,6 +1254,7 @@
   async function init() {
     state.db = await openDb();
     loadPages();
+    await tryLoadPublishedPages();
     state.selectedId = state.pages[0]?.id || "";
     window.addEventListener("hashchange", render);
     render();
