@@ -77,6 +77,7 @@
     selectedFiles: [],
     uploadErrors: [],
     previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
+    settingsOpen: false,
     editId: null,
     db: null,
     github: loadGithubSettings(),
@@ -617,7 +618,7 @@
           </label>
           <div class="top-actions">
             <button class="primary" id="topNew">${icon("plus")} Νέα σελίδα</button>
-            <button class="icon-button" title="Βοήθεια">${icon("settings")}</button>
+            <button class="icon-button" id="openSettings" title="Ρυθμίσεις GitHub">${icon("settings")}</button>
             <div class="avatar">ΑΔ</div>
           </div>
         </header>
@@ -635,8 +636,13 @@
             ${renderPagesList(filtered)}
             ${state.previewOpen ? renderPreview(selected) : ""}
           </div>
+          <button class="preview-rail-toggle ${state.previewOpen ? "open" : ""}" id="previewRailToggle" type="button" title="${state.previewOpen ? "Κλείσιμο προεπισκόπησης" : "Άνοιγμα προεπισκόπησης"}">
+            ${icon(state.previewOpen ? "chevron" : "eye")}
+            <span>${state.previewOpen ? "Κλείσιμο" : "Προεπισκόπηση"}</span>
+          </button>
         </main>
       </div>
+      ${state.settingsOpen ? renderGithubSettingsModal() : ""}
     `;
 
     bindAdminEvents();
@@ -656,7 +662,6 @@
           </div>
         </div>
         <form class="form-body" id="pageForm">
-          ${renderGithubSettings()}
           <div class="field">
             <label for="title">${editing ? "Τίτλος σελίδας" : "Τίτλος ή πρόθεμα"} ${editing ? '<span class="required">*</span>' : ""}</label>
             <input class="input" id="title" name="title" ${editing ? "required" : ""} value="${escapeHtml(editing ? editing.title : "")}" placeholder="${editing ? "" : "Προαιρετικό - αλλιώς θα μπει το όνομα αρχείου"}" />
@@ -706,46 +711,54 @@
     `;
   }
 
-  function renderGithubSettings() {
+  function renderGithubSettingsModal() {
     const settings = state.github;
     return `
-      <section class="github-settings" aria-label="Ρυθμίσεις GitHub">
-        <div class="github-settings-head">
-          <div>
-            <h2>Αποθήκευση στο GitHub</h2>
-            <p>Τα αρχεία ανεβαίνουν στο repo και τα δημόσια στοιχεία γράφονται στο ${INDEX_PATH}.</p>
+      <div class="modal-backdrop" role="presentation">
+        <section class="settings-modal" role="dialog" aria-modal="true" aria-label="Ρυθμίσεις GitHub">
+          <div class="settings-modal-head">
+            <div>
+              <h2>Ρυθμίσεις αποθήκευσης</h2>
+              <p>Αυτό χρειάζεται μόνο μία φορά, για να ξέρει η εφαρμογή σε ποιο GitHub repo θα ανεβάζει τα αρχεία.</p>
+            </div>
+            <button class="icon-button" id="closeSettings" type="button" title="Κλείσιμο">${icon("x")}</button>
           </div>
-          <span class="status ${githubSettingsReady() ? "live" : "draft"}">${githubSettingsReady() ? "Έτοιμο" : "Χρειάζεται ρύθμιση"}</span>
-        </div>
-        <div class="github-grid">
-          <label>
-            <span>Owner</span>
-            <input class="input" id="ghOwner" value="${escapeHtml(settings.owner)}" placeholder="username ή org" />
+          <div class="settings-status">
+            <span class="status ${githubSettingsReady() ? "live" : "draft"}">${githubSettingsReady() ? "Έτοιμο για upload" : "Δεν έχει ρυθμιστεί"}</span>
+          </div>
+          <div class="settings-grid">
+            <label>
+              <span>GitHub owner</span>
+              <input class="input" id="ghOwner" value="${escapeHtml(settings.owner)}" placeholder="username ή organization" />
+            </label>
+            <label>
+              <span>Repository</span>
+              <input class="input" id="ghRepo" value="${escapeHtml(settings.repo)}" placeholder="όνομα repository" />
+            </label>
+            <label>
+              <span>Branch</span>
+              <input class="input" id="ghBranch" value="${escapeHtml(settings.branch)}" placeholder="main" />
+            </label>
+            <label>
+              <span>Φάκελος αρχείων</span>
+              <input class="input" id="ghMediaDir" value="${escapeHtml(settings.mediaDir)}" placeholder="media" />
+            </label>
+          </div>
+          <label class="settings-wide">
+            <span>Δημόσιο URL site</span>
+            <input class="input" id="ghSiteBaseUrl" value="${escapeHtml(settings.siteBaseUrl)}" placeholder="https://username.github.io/repo/" />
           </label>
-          <label>
-            <span>Repo</span>
-            <input class="input" id="ghRepo" value="${escapeHtml(settings.repo)}" placeholder="repo-name" />
+          <label class="settings-wide">
+            <span>GitHub token</span>
+            <input class="input" id="ghToken" type="password" value="${escapeHtml(settings.token)}" placeholder="Token με Contents: Read and write" autocomplete="off" />
           </label>
-          <label>
-            <span>Branch</span>
-            <input class="input" id="ghBranch" value="${escapeHtml(settings.branch)}" placeholder="main" />
-          </label>
-          <label>
-            <span>Media folder</span>
-            <input class="input" id="ghMediaDir" value="${escapeHtml(settings.mediaDir)}" placeholder="media" />
-          </label>
-        </div>
-        <label class="github-wide">
-          <span>GitHub Pages URL</span>
-          <input class="input" id="ghSiteBaseUrl" value="${escapeHtml(settings.siteBaseUrl)}" placeholder="https://username.github.io/repo/" />
-        </label>
-        <label class="github-wide">
-          <span>Fine-grained token</span>
-          <input class="input" id="ghToken" type="password" value="${escapeHtml(settings.token)}" placeholder="Token με Contents: Read and write" autocomplete="off" />
-        </label>
-        <p class="github-note">Το token μένει μόνο σε αυτόν τον browser. Μην δημοσιεύσεις ποτέ το token μέσα στο repo.</p>
-        <button class="secondary" type="button" id="saveGithubSettings">${icon("settings")} Αποθήκευση GitHub ρυθμίσεων</button>
-      </section>
+          <p class="settings-note">Το token μένει μόνο σε αυτόν τον browser και δεν ανεβαίνει στο GitHub.</p>
+          <div class="settings-actions">
+            <button class="secondary" type="button" id="closeSettingsSecondary">Άκυρο</button>
+            <button class="primary" type="button" id="saveGithubSettings">${icon("settings")} Αποθήκευση</button>
+          </div>
+        </section>
+      </div>
     `;
   }
 
@@ -823,7 +836,6 @@
             <h2 class="panel-title">Οι σελίδες μου (${state.pages.length})</h2>
           </div>
           <div class="table-tools">
-            <button class="secondary" id="togglePreview" type="button">${icon(state.previewOpen ? "chevron" : "eye")} ${state.previewOpen ? "Κλείσιμο προεπισκόπησης" : "Άνοιγμα προεπισκόπησης"}</button>
             <label class="search mini-search">
               ${icon("search")}
               <input id="tableSearch" type="search" value="${escapeHtml(state.search)}" placeholder="Αναζήτηση σελίδων..." />
@@ -934,7 +946,13 @@
       clearFormState();
       renderAdmin();
     });
-    document.getElementById("togglePreview")?.addEventListener("click", togglePreview);
+    document.getElementById("openSettings")?.addEventListener("click", () => {
+      state.settingsOpen = true;
+      renderAdmin();
+    });
+    document.getElementById("closeSettings")?.addEventListener("click", closeSettings);
+    document.getElementById("closeSettingsSecondary")?.addEventListener("click", closeSettings);
+    document.getElementById("previewRailToggle")?.addEventListener("click", togglePreview);
     document.getElementById("closePreview")?.addEventListener("click", togglePreview);
 
     const title = document.getElementById("title");
@@ -974,6 +992,11 @@
     renderAdmin();
   }
 
+  function closeSettings() {
+    state.settingsOpen = false;
+    renderAdmin();
+  }
+
   function bindGithubSettings() {
     document.getElementById("saveGithubSettings")?.addEventListener("click", () => {
       saveGithubSettings({
@@ -984,8 +1007,9 @@
         siteBaseUrl: document.getElementById("ghSiteBaseUrl")?.value || "",
         token: document.getElementById("ghToken")?.value || "",
       });
+      state.settingsOpen = false;
       renderAdmin();
-      showToast("Οι ρυθμίσεις GitHub αποθηκεύτηκαν.");
+      showToast("Οι ρυθμίσεις αποθήκευσης αποθηκεύτηκαν.");
     });
   }
 

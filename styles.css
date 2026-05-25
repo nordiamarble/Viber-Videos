@@ -277,6 +277,7 @@ select:focus {
 
 .main {
   min-width: 0;
+  position: relative;
   padding: 18px;
 }
 
@@ -289,6 +290,41 @@ select:focus {
 
 .dashboard-grid.preview-closed {
   grid-template-columns: minmax(270px, 380px) minmax(620px, 1fr);
+}
+
+.preview-rail-toggle {
+  position: fixed;
+  right: 14px;
+  top: 50%;
+  z-index: 35;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--accent-dark);
+  box-shadow: 0 14px 36px rgba(23, 31, 38, 0.16);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  transform: translateY(-50%);
+}
+
+.preview-rail-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.preview-rail-toggle.open svg {
+  transform: rotate(180deg);
 }
 
 .panel {
@@ -329,58 +365,6 @@ select:focus {
   display: grid;
   gap: 16px;
   padding: 18px;
-}
-
-.github-settings {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid rgba(0, 140, 140, 0.22);
-  border-radius: 8px;
-  background: var(--surface-soft);
-}
-
-.github-settings-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.github-settings h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 820;
-}
-
-.github-settings p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.github-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.github-grid label,
-.github-wide {
-  display: grid;
-  gap: 6px;
-}
-
-.github-grid span,
-.github-wide span {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.github-note {
-  margin: 0;
 }
 
 .field {
@@ -955,6 +939,82 @@ tr:last-child td {
   transform: translateY(0);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(17, 24, 30, 0.38);
+}
+
+.settings-modal {
+  width: min(680px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+
+.settings-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settings-modal h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.settings-modal p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-grid label,
+.settings-wide {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-grid span,
+.settings-wide span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.settings-status {
+  display: flex;
+}
+
+.settings-note {
+  margin: 0;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .public-page {
   min-height: 100vh;
   background: #fff;
@@ -1135,6 +1195,13 @@ tr:last-child td {
   .public-side {
     position: static;
   }
+
+  .preview-rail-toggle {
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    transform: none;
+  }
 }
 
 @media (max-width: 620px) {
@@ -1179,7 +1246,20 @@ tr:last-child td {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .github-grid {
+  .preview-rail-toggle span {
+    display: none;
+  }
+
+  .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-actions {
+    flex-direction: column-reverse;
+  }
+
+  .settings-actions .primary,
+  .settings-actions .secondary {
+    width: 100%;
   }
 }
