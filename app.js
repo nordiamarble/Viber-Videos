@@ -300,21 +300,15 @@
     return logo?.dataUrl || logo?.url || "";
   }
 
-  function renderMediaOverlay(page) {
+  function renderTextOverlay(page) {
     if (!page) return "";
-    const logoUrl = logoSrc(page.logo);
     const text = String(page.overlayText || "").trim();
     const subtext = String(page.overlaySubtext || "").trim();
-    if (!logoUrl && !text && !subtext) return "";
+    if (!text && !subtext) return "";
     return `
-      <div class="media-brand-overlay">
-        ${logoUrl ? `<img class="media-overlay-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : ""}
-        ${(text || subtext) ? `
-          <div class="media-overlay-copy">
-            ${text ? `<strong>${escapeHtml(text)}</strong>` : ""}
-            ${subtext ? `<span>${escapeHtml(subtext)}</span>` : ""}
-          </div>
-        ` : ""}
+      <div class="media-text-overlay">
+        ${text ? `<strong>${escapeHtml(text)}</strong>` : ""}
+        ${subtext ? `<span>${escapeHtml(subtext)}</span>` : ""}
       </div>
     `;
   }
@@ -823,8 +817,8 @@
           </div>
           <div class="field">
             <label for="overlayText">Κείμενο επικάλυψης</label>
-            <input class="input" id="overlayText" maxlength="90" value="${escapeHtml(draft.overlayText || "")}" placeholder="π.χ. NORDIA Marble Collection" />
-            <span class="hint">Εμφανίζεται πάνω στο βίντεο ή στη φωτογραφία μαζί με το λογότυπο.</span>
+            <input class="input" id="overlayText" maxlength="90" value="${escapeHtml(draft.overlayText || "")}" placeholder="π.χ. 2616 Bellagio" />
+            <span class="hint">Εμφανίζεται πάνω αριστερά στο βίντεο ή στη φωτογραφία, όπως στο δείγμα.</span>
           </div>
           <div class="field">
             <label for="overlaySubtext">Μικρό κείμενο επικάλυψης</label>
@@ -1089,8 +1083,10 @@
     const url = page ? pageUrl(page.slug) : "";
     const video = page ? pageVideo(page) : null;
     const thumbnail = page ? pageThumbnail(page) : null;
+    const previewMedia = video || thumbnail;
     const logo = page?.logo;
     const logoUrl = logoSrc(logo);
+    const overlay = page ? renderTextOverlay(page) : "";
     return `
       <section class="panel preview-panel">
         <div class="panel-header">
@@ -1112,7 +1108,8 @@
               <div class="preview-content">
                 <h3 class="preview-title">${escapeHtml(page.title)}</h3>
               </div>
-              <div class="preview-media" data-preview-video="${escapeHtml(video ? video.id : "")}" data-preview-poster="${escapeHtml(thumbnail ? thumbnail.id : "")}">
+              <div class="preview-media" data-preview-video="${escapeHtml(previewMedia ? previewMedia.id : "")}" data-preview-poster="${escapeHtml(thumbnail ? thumbnail.id : "")}">
+                ${overlay}
                 ${video ? `<span class="play-overlay">${icon("play")}</span>` : ""}
                 ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
@@ -1172,6 +1169,8 @@
     const title = document.getElementById("title");
     const description = document.getElementById("description");
     const slug = document.getElementById("slug");
+    const overlayText = document.getElementById("overlayText");
+    const overlaySubtext = document.getElementById("overlaySubtext");
     title?.addEventListener("input", () => {
       if (!state.editId) {
         state.draft.title = title.value;
@@ -1185,6 +1184,12 @@
     });
     description?.addEventListener("input", () => {
       if (!state.editId) state.draft.description = description.value;
+    });
+    overlayText?.addEventListener("input", () => {
+      state.draft.overlayText = overlayText.value;
+    });
+    overlaySubtext?.addEventListener("input", () => {
+      state.draft.overlaySubtext = overlaySubtext.value;
     });
     slug?.addEventListener("input", () => {
       slug.value = slugify(slug.value);
@@ -1367,12 +1372,15 @@
     ctx.drawImage(image, x, y, drawWidth, drawHeight);
 
     if (editor.topText.trim()) {
-      ctx.fillStyle = "rgba(10, 17, 20, 0.68)";
-      ctx.fillRect(0, 0, width, 112);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "700 56px Arial, sans-serif";
+      ctx.font = "900 58px Arial, sans-serif";
       ctx.textBaseline = "middle";
-      ctx.fillText(editor.topText.trim().slice(0, 48), 54, 58);
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = "#1d1d1d";
+      ctx.fillStyle = "#ffffff";
+      const text = editor.topText.trim().slice(0, 48);
+      ctx.strokeText(text, 54, 58);
+      ctx.fillText(text, 54, 58);
     }
 
     if (editor.logoText.trim()) {
@@ -1536,6 +1544,8 @@
         state.selectedFiles = [];
         state.uploadErrors = [];
         state.draft.logoId = page?.logo?.id || "";
+        state.draft.overlayText = page?.overlayText || "";
+        state.draft.overlaySubtext = page?.overlaySubtext || "";
         renderAdmin();
         document.getElementById("createPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
@@ -1632,6 +1642,8 @@
     const published = form.querySelector("#published").checked;
     const selectedLogoId = form.querySelector("#pageLogo")?.value || "";
     const selectedLogo = logoById(selectedLogoId);
+    const overlayText = form.querySelector("#overlayText")?.value.trim() || "";
+    const overlaySubtext = form.querySelector("#overlaySubtext")?.value.trim() || "";
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
     const pairState = selectedVideoThumbnailPairs();
 
@@ -1676,6 +1688,8 @@
             published,
             files: [video, thumbnail],
             logo: selectedLogo,
+            overlayText,
+            overlaySubtext,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -1708,6 +1722,8 @@
         published,
         files,
         logo: selectedLogo,
+        overlayText,
+        overlaySubtext,
         createdAt: existing.createdAt,
         updatedAt: new Date().toISOString(),
       };
@@ -1737,6 +1753,8 @@
       published: true,
       slugTouched: false,
       logoId: "",
+      overlayText: "",
+      overlaySubtext: "",
     };
   }
 
@@ -1759,10 +1777,11 @@
         const poster = pageThumbnail(page);
         const posterSrc = poster ? await mediaSrc(poster) : "";
         const logoUrl = logoSrc(page.logo);
+        const overlayHtml = renderTextOverlay(page);
         const logoHtml = logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : "";
         target.innerHTML = isVideo
-          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>${logoHtml}`
-          : `<img src="${src}" alt="${escapeHtml(media.name)}" />${logoHtml}`;
+          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>${overlayHtml}${logoHtml}`
+          : `<img src="${src}" alt="${escapeHtml(media.name)}" />${overlayHtml}${logoHtml}`;
       } else if (target.dataset.galleryMedia !== undefined) {
         target.outerHTML = isVideo
           ? `<video src="${src}" muted playsinline></video>`
@@ -1796,6 +1815,7 @@
     const thumbnail = pageThumbnail(page);
     const logo = page.logo;
     const logoUrl = logoSrc(logo);
+    const overlay = renderTextOverlay(page);
     const videoSrc = await mediaSrc(video);
     const thumbnailSrc = await mediaSrc(thumbnail);
     app.innerHTML = `
@@ -1816,6 +1836,7 @@
                 ${video && video.type.startsWith("video/")
                   ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} controls playsinline></video>`
                   : `<img src="${thumbnailSrc || videoSrc}" alt="${escapeHtml(thumbnail ? thumbnail.name : page.title)}" />`}
+                ${overlay}
                 ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
               ${thumbnail ? `
