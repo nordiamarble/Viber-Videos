@@ -4,6 +4,7 @@
   const STORE = "files";
   const META_KEY = "media-pages:pages";
   const SETTINGS_KEY = "media-pages:github-settings";
+  const LOGOS_KEY = "media-pages:logos";
   const INDEX_PATH = "data/pages.json";
   const GITHUB_API_VERSION = "2022-11-28";
   const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
@@ -11,6 +12,23 @@
   const MAX_VIDEO_SECONDS = 600;
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
   const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
+  const BUILTIN_LOGOS = [
+    {
+      id: "builtin-dionyssomarble",
+      name: "Dionyssomarble",
+      url: "./assets/logos/dionyssomarble-transparent.png",
+    },
+    {
+      id: "builtin-nordia-marble",
+      name: "NORDIA Marble",
+      url: "./assets/logos/nordia-marble-transparent.png",
+    },
+    {
+      id: "builtin-dionyssomarble-nordia",
+      name: "Διπλό λογότυπο",
+      url: "./assets/logos/dionyssomarble-nordia-combo-transparent.png",
+    },
+  ];
 
   const icons = {
     menu: "M4 6h16M4 12h16M4 18h16",
@@ -82,10 +100,14 @@
       slug: "",
       published: true,
       slugTouched: false,
+      logoId: "",
+      overlayText: "",
+      overlaySubtext: "",
     },
     previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
     settingsOpen: false,
     imageEditor: null,
+    logos: loadLogos(),
     editId: null,
     db: null,
     github: loadGithubSettings(),
@@ -187,6 +209,12 @@
     return extension ? `${base}.${extension}` : base;
   }
 
+  function mediaUploadName(item) {
+    const name = item.name || item.file?.name || "media";
+    const extension = fileExtension({ name }) || fileExtension(item.file || {});
+    return fileExtension({ name }) || !extension ? name : `${name}.${extension}`;
+  }
+
   function githubSettingsReady() {
     const settings = state.github;
     return Boolean(settings.owner && settings.repo && settings.branch && settings.token);
@@ -218,6 +246,77 @@
       token: settings.token.trim(),
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.github));
+  }
+
+  function loadLogos() {
+    try {
+      const logos = JSON.parse(localStorage.getItem(LOGOS_KEY) || "[]");
+      return Array.isArray(logos) ? logos : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLogos() {
+    localStorage.setItem(LOGOS_KEY, JSON.stringify(state.logos));
+  }
+
+  function mergeLogos(logos) {
+    if (!Array.isArray(logos)) return;
+    const byId = new Map(state.logos.map((logo) => [logo.id, logo]));
+    logos.forEach((logo) => {
+      if (logo?.id && logo?.dataUrl) byId.set(logo.id, logo);
+    });
+    state.logos = Array.from(byId.values());
+    saveLogos();
+  }
+
+  function mergePageLogos() {
+    mergeLogos(state.pages.map((page) => page.logo).filter(Boolean));
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function allLogos() {
+    const builtinIds = new Set(BUILTIN_LOGOS.map((logo) => logo.id));
+    return [
+      ...BUILTIN_LOGOS,
+      ...state.logos.filter((logo) => logo?.id && !builtinIds.has(logo.id)),
+    ];
+  }
+
+  function logoById(id) {
+    return allLogos().find((logo) => logo.id === id) || null;
+  }
+
+  function logoSrc(logo) {
+    return logo?.dataUrl || logo?.url || "";
+  }
+
+  function renderMediaOverlay(page) {
+    if (!page) return "";
+    const logoUrl = logoSrc(page.logo);
+    const text = String(page.overlayText || "").trim();
+    const subtext = String(page.overlaySubtext || "").trim();
+    if (!logoUrl && !text && !subtext) return "";
+    return `
+      <div class="media-brand-overlay">
+        ${logoUrl ? `<img class="media-overlay-logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : ""}
+        ${(text || subtext) ? `
+          <div class="media-overlay-copy">
+            ${text ? `<strong>${escapeHtml(text)}</strong>` : ""}
+            ${subtext ? `<span>${escapeHtml(subtext)}</span>` : ""}
+          </div>
+        ` : ""}
+      </div>
+    `;
   }
 
   function pageUrl(slug) {
@@ -433,6 +532,7 @@
     }
     try {
       state.pages = JSON.parse(raw);
+      mergePageLogos();
     } catch {
       state.pages = samplePages;
       savePages();
@@ -516,14 +616,15 @@
     if (item.size > MAX_GITHUB_BYTES) {
       throw new Error(`${item.name}: το GitHub repo δέχεται έως 100 MB ανά αρχείο.`);
     }
+    const uploadName = mediaUploadName(item);
     const stamp = new Date().toISOString().slice(0, 10);
     const role = item.kind === "image" ? "thumbnail" : "video";
-    const path = `${normalizeFolder(state.github.mediaDir)}/${stamp}/${slug}-${role}-${cleanFileName(item.name)}`;
+    const path = `${normalizeFolder(state.github.mediaDir)}/${stamp}/${slug}-${role}-${cleanFileName(uploadName)}`;
     const content = await fileToBase64(item.file);
-    await uploadGithubFile(path, content, `Add media ${item.name}`);
+    await uploadGithubFile(path, content, `Add media ${uploadName}`);
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: item.name,
+      name: uploadName,
       type: item.type,
       size: item.size,
       kind: item.kind,
@@ -535,7 +636,7 @@
 
   async function syncPagesToGithub() {
     const publicPages = state.pages.filter((page) => !page.id.startsWith("sample-"));
-    const json = JSON.stringify({ pages: publicPages }, null, 2);
+    const json = JSON.stringify({ pages: publicPages, logos: state.logos }, null, 2);
     await uploadGithubFile(INDEX_PATH, await textToBase64(json), "Update media pages index");
   }
 
@@ -549,6 +650,8 @@
       const byId = new Map(state.pages.map((page) => [page.id, page]));
       payload.pages.forEach((page) => byId.set(page.id, page));
       state.pages = Array.from(byId.values());
+      mergeLogos(payload.logos);
+      mergePageLogos();
       savePages();
     } catch {
       // The public index exists only after the first GitHub sync.
@@ -657,6 +760,9 @@
       description: editing.description,
       slug: editing.slug,
       published: editing.published,
+      logoId: state.draft.logoId || editing.logo?.id || "",
+      overlayText: state.draft.overlayText || editing.overlayText || "",
+      overlaySubtext: state.draft.overlaySubtext || editing.overlaySubtext || "",
     } : state.draft;
     const pairs = selectedVideoThumbnailPairs();
     const batchMode = !editing && pairs.pairs.length > 1;
@@ -700,6 +806,29 @@
               ${renderSelectedFiles(editing)}
             </div>
             ${renderUploadErrors()}
+          </div>
+          <div class="field">
+            <label for="pageLogo">Λογότυπο επικάλυψης</label>
+            <div class="logo-row">
+              <select id="pageLogo" class="input">
+                <option value="">Χωρίς λογότυπο</option>
+                ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${draft.logoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
+              </select>
+              <label class="secondary logo-upload-button">
+                ${icon("upload")} Νέο λογότυπο
+                <input id="logoInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+              </label>
+            </div>
+            <span class="hint">Το λογότυπο αποθηκεύεται για επόμενη χρήση και μπορεί να μπει πάνω σε thumbnail ή στο video player.</span>
+          </div>
+          <div class="field">
+            <label for="overlayText">Κείμενο επικάλυψης</label>
+            <input class="input" id="overlayText" maxlength="90" value="${escapeHtml(draft.overlayText || "")}" placeholder="π.χ. NORDIA Marble Collection" />
+            <span class="hint">Εμφανίζεται πάνω στο βίντεο ή στη φωτογραφία μαζί με το λογότυπο.</span>
+          </div>
+          <div class="field">
+            <label for="overlaySubtext">Μικρό κείμενο επικάλυψης</label>
+            <input class="input" id="overlaySubtext" maxlength="120" value="${escapeHtml(draft.overlaySubtext || "")}" placeholder="π.χ. Premium marble surfaces" />
           </div>
           <div class="switch-row">
             <div class="switch-copy">
@@ -788,7 +917,7 @@
         <div class="media-file">
           <div data-thumb="${escapeHtml(file.id)}" class="thumb-fallback">${icon(file.type.startsWith("video/") ? "video" : "image")}</div>
           <div>
-            <p class="file-name">${escapeHtml(file.name)}</p>
+            ${file.pendingIndex !== undefined ? `<input class="input file-rename" data-index="${file.pendingIndex}" value="${escapeHtml(file.name)}" aria-label="Μετονομασία αρχείου" />` : `<p class="file-name">${escapeHtml(file.name)}</p>`}
             <p class="file-meta">${escapeHtml(file.kind === "image" ? "thumbnail" : file.kind === "video" ? "video" : mediaKind([file]))} · ${escapeHtml(mediaMeta(file))}${file.pendingIndex !== undefined ? " · θα μπει σε ζευγάρι" : ""}</p>
           </div>
           <div class="media-file-actions">
@@ -819,8 +948,22 @@
           <div class="editor-layout">
             <div class="editor-canvas-wrap">
               <canvas id="thumbnailCanvas" width="1280" height="720"></canvas>
+              ${state.imageEditor.aspect === "free" ? '<div class="crop-frame" id="cropFrame"></div>' : ""}
             </div>
             <div class="editor-controls">
+              <label>
+                <span>Μέγεθος</span>
+                <select class="input" id="editAspect">
+                  ${[
+                    ["16:9", "16:9"],
+                    ["9:16", "9:16"],
+                    ["4:3", "4:3"],
+                    ["3:4", "3:4"],
+                    ["1:1", "1:1"],
+                    ["free", "Ελεύθερο με περίγραμμα"],
+                  ].map(([value, label]) => `<option value="${value}" ${state.imageEditor.aspect === value ? "selected" : ""}>${label}</option>`).join("")}
+                </select>
+              </label>
               <label>
                 <span>Crop zoom</span>
                 <input id="editZoom" type="range" min="1" max="3" step="0.01" value="${state.imageEditor.zoom}" />
@@ -840,6 +983,13 @@
               <label>
                 <span>Λογότυπο / label</span>
                 <input class="input" id="editLogoText" value="${escapeHtml(state.imageEditor.logoText)}" placeholder="π.χ. Brand" />
+              </label>
+              <label>
+                <span>Αποθηκευμένο λογότυπο</span>
+                <select class="input" id="editLogoId">
+                  <option value="">Χωρίς εικόνα λογότυπου</option>
+                  ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${state.imageEditor.logoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
+                </select>
               </label>
             </div>
           </div>
@@ -939,6 +1089,8 @@
     const url = page ? pageUrl(page.slug) : "";
     const video = page ? pageVideo(page) : null;
     const thumbnail = page ? pageThumbnail(page) : null;
+    const logo = page?.logo;
+    const logoUrl = logoSrc(logo);
     return `
       <section class="panel preview-panel">
         <div class="panel-header">
@@ -962,6 +1114,7 @@
               </div>
               <div class="preview-media" data-preview-video="${escapeHtml(video ? video.id : "")}" data-preview-poster="${escapeHtml(thumbnail ? thumbnail.id : "")}">
                 ${video ? `<span class="play-overlay">${icon("play")}</span>` : ""}
+                ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
               <div class="preview-content">
                 <p class="preview-description">${escapeHtml(page.description || "Χωρίς περιγραφή.")}</p>
@@ -1045,6 +1198,10 @@
     document.getElementById("published")?.addEventListener("change", (event) => {
       if (!state.editId) state.draft.published = event.target.checked;
     });
+    document.getElementById("pageLogo")?.addEventListener("change", (event) => {
+      state.draft.logoId = event.target.value;
+    });
+    document.getElementById("logoInput")?.addEventListener("change", addLogoFromInput);
 
     bindDropzone();
     bindActions();
@@ -1059,6 +1216,12 @@
     });
     document.querySelectorAll(".edit-thumbnail").forEach((button) => {
       button.addEventListener("click", () => openImageEditor(Number(button.dataset.index)));
+    });
+    document.querySelectorAll(".file-rename").forEach((input) => {
+      input.addEventListener("input", () => {
+        const item = state.selectedFiles[Number(input.dataset.index)];
+        if (item) item.name = input.value.trim() || item.file.name;
+      });
     });
 
     document.querySelectorAll("tr[data-row]").forEach((row) => {
@@ -1083,17 +1246,41 @@
     renderAdmin();
   }
 
+  async function addLogoFromInput(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    const extension = fileExtension(file);
+    if (!IMAGE_EXTENSIONS.has(extension)) {
+      showToast("Το λογότυπο πρέπει να είναι png, jpg ή jpeg.");
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    const logo = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: fileTitle(file.name),
+      dataUrl,
+    };
+    state.logos = [logo, ...state.logos];
+    state.draft.logoId = logo.id;
+    saveLogos();
+    renderAdmin();
+    showToast("Το λογότυπο αποθηκεύτηκε.");
+  }
+
   function openImageEditor(index) {
     const item = state.selectedFiles[index];
     if (!item || item.kind !== "image") return;
     state.imageEditor = {
       index,
       previewUrl: URL.createObjectURL(item.file),
+      aspect: "16:9",
       zoom: 1,
       offsetX: 0,
       offsetY: 0,
       topText: "",
       logoText: "",
+      logoId: state.draft.logoId || "",
     };
     renderAdmin();
   }
@@ -1109,74 +1296,150 @@
     state.imageEditor.zoom = 1;
     state.imageEditor.offsetX = 0;
     state.imageEditor.offsetY = 0;
+    state.imageEditor.aspect = "16:9";
     state.imageEditor.topText = "";
     state.imageEditor.logoText = "";
+    state.imageEditor.logoId = state.draft.logoId || "";
     renderAdmin();
   }
 
   function bindImageEditorControls() {
     if (!state.imageEditor) return;
     const controls = [
+      ["editAspect", "aspect", String],
       ["editZoom", "zoom", Number],
       ["editOffsetX", "offsetX", Number],
       ["editOffsetY", "offsetY", Number],
       ["editTopText", "topText", String],
       ["editLogoText", "logoText", String],
+      ["editLogoId", "logoId", String],
     ];
     controls.forEach(([id, key, cast]) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => {
         state.imageEditor[key] = cast(input.value);
-        drawImageEditorCanvas();
+        if (key === "aspect") renderAdmin();
+        else drawImageEditorCanvas();
       });
     });
+    bindCropFrameDrag();
   }
 
   function drawImageEditorCanvas() {
     const editor = state.imageEditor;
     const canvas = document.getElementById("thumbnailCanvas");
     if (!editor || !canvas) return;
+    renderEditedThumbnail(canvas).catch(() => {
+      showToast("Δεν μπόρεσα να φορτώσω την εικόνα για επεξεργασία.");
+    });
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = src;
+    });
+  }
+
+  async function renderEditedThumbnail(canvas) {
+    const editor = state.imageEditor;
+    if (!editor || !canvas) return;
     const ctx = canvas.getContext("2d");
-    const image = new Image();
-    image.onload = () => {
-      const width = canvas.width;
-      const height = canvas.height;
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#111820";
-      ctx.fillRect(0, 0, width, height);
+    const [ratioW, ratioH] = aspectSize(editor.aspect);
+    canvas.width = ratioW;
+    canvas.height = ratioH;
+    canvas.style.aspectRatio = `${ratioW} / ${ratioH}`;
 
-      const scale = Math.max(width / image.width, height / image.height) * editor.zoom;
-      const drawWidth = image.width * scale;
-      const drawHeight = image.height * scale;
-      const x = (width - drawWidth) / 2 + (editor.offsetX / 100) * width;
-      const y = (height - drawHeight) / 2 + (editor.offsetY / 100) * height;
-      ctx.drawImage(image, x, y, drawWidth, drawHeight);
+    const image = await loadImage(editor.previewUrl);
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#111820";
+    ctx.fillRect(0, 0, width, height);
 
-      if (editor.topText.trim()) {
-        ctx.fillStyle = "rgba(10, 17, 20, 0.68)";
-        ctx.fillRect(0, 0, width, 112);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "700 56px Arial, sans-serif";
-        ctx.textBaseline = "middle";
-        ctx.fillText(editor.topText.trim().slice(0, 48), 54, 58);
-      }
+    const scale = Math.max(width / image.width, height / image.height) * editor.zoom;
+    const drawWidth = image.width * scale;
+    const drawHeight = image.height * scale;
+    const x = (width - drawWidth) / 2 + (editor.offsetX / 100) * width;
+    const y = (height - drawHeight) / 2 + (editor.offsetY / 100) * height;
+    ctx.drawImage(image, x, y, drawWidth, drawHeight);
 
-      if (editor.logoText.trim()) {
-        const text = editor.logoText.trim().slice(0, 22);
-        ctx.font = "700 34px Arial, sans-serif";
-        const boxWidth = Math.min(width - 80, ctx.measureText(text).width + 56);
-        const boxHeight = 64;
-        const boxX = width - boxWidth - 40;
-        const boxY = height - boxHeight - 36;
-        ctx.fillStyle = "rgba(0, 140, 140, 0.92)";
-        roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 14);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.textBaseline = "middle";
-        ctx.fillText(text, boxX + 28, boxY + boxHeight / 2 + 1);
-      }
+    if (editor.topText.trim()) {
+      ctx.fillStyle = "rgba(10, 17, 20, 0.68)";
+      ctx.fillRect(0, 0, width, 112);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "700 56px Arial, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText(editor.topText.trim().slice(0, 48), 54, 58);
+    }
+
+    if (editor.logoText.trim()) {
+      const text = editor.logoText.trim().slice(0, 22);
+      ctx.font = "700 34px Arial, sans-serif";
+      const boxWidth = Math.min(width - 80, ctx.measureText(text).width + 56);
+      const boxHeight = 64;
+      const boxX = width - boxWidth - 40;
+      const boxY = height - boxHeight - 36;
+      ctx.fillStyle = "rgba(0, 140, 140, 0.92)";
+      roundRect(ctx, boxX, boxY, boxWidth, boxHeight, 14);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, boxX + 28, boxY + boxHeight / 2 + 1);
+    }
+
+    const logo = logoById(editor.logoId);
+    const source = logoSrc(logo);
+    if (source) {
+      const logoImage = await loadImage(source);
+      const logoWidth = Math.min(width * 0.2, logoImage.width);
+      const logoHeight = logoImage.height * (logoWidth / logoImage.width);
+      ctx.drawImage(logoImage, width - logoWidth - 40, 36, logoWidth, logoHeight);
+    }
+  }
+
+  function aspectSize(aspect) {
+    const map = {
+      "16:9": [1280, 720],
+      "9:16": [720, 1280],
+      "4:3": [1200, 900],
+      "3:4": [900, 1200],
+      "1:1": [1000, 1000],
+      free: [1280, 720],
     };
-    image.src = editor.previewUrl;
+    return map[aspect] || map["16:9"];
+  }
+
+  function bindCropFrameDrag() {
+    const frame = document.getElementById("cropFrame");
+    const wrap = frame?.parentElement;
+    if (!frame || !wrap) return;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    frame.addEventListener("pointerdown", (event) => {
+      if (event.target !== frame) return;
+      event.preventDefault();
+      frame.setPointerCapture(event.pointerId);
+      const frameRect = frame.getBoundingClientRect();
+      const wrapRect = wrap.getBoundingClientRect();
+      startX = event.clientX;
+      startY = event.clientY;
+      startLeft = frameRect.left - wrapRect.left;
+      startTop = frameRect.top - wrapRect.top;
+    });
+    frame.addEventListener("pointermove", (event) => {
+      if (!frame.hasPointerCapture(event.pointerId)) return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      const nextLeft = Math.max(0, Math.min(wrapRect.width - frameRect.width, startLeft + event.clientX - startX));
+      const nextTop = Math.max(0, Math.min(wrapRect.height - frameRect.height, startTop + event.clientY - startY));
+      frame.style.left = `${nextLeft}px`;
+      frame.style.top = `${nextTop}px`;
+    });
   }
 
   function roundRect(ctx, x, y, width, height, radius) {
@@ -1198,8 +1461,9 @@
     const canvas = document.getElementById("thumbnailCanvas");
     const original = editor ? state.selectedFiles[editor.index] : null;
     if (!editor || !canvas || !original) return;
-    drawImageEditorCanvas();
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
+    await renderEditedThumbnail(canvas);
+    const outputCanvas = editor.aspect === "free" ? cropCanvasToFrame(canvas) : canvas;
+    const blob = await new Promise((resolve) => outputCanvas.toBlob(resolve, "image/png", 0.92));
     if (!blob) {
       showToast("Δεν μπόρεσα να αποθηκεύσω το thumbnail.");
       return;
@@ -1215,6 +1479,24 @@
     };
     closeImageEditor();
     showToast("Το thumbnail ενημερώθηκε.");
+  }
+
+  function cropCanvasToFrame(canvas) {
+    const frame = document.getElementById("cropFrame");
+    if (!frame) return canvas;
+    const canvasRect = canvas.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    const scaleX = canvas.width / canvasRect.width;
+    const scaleY = canvas.height / canvasRect.height;
+    const sx = Math.max(0, (frameRect.left - canvasRect.left) * scaleX);
+    const sy = Math.max(0, (frameRect.top - canvasRect.top) * scaleY);
+    const sw = Math.min(canvas.width - sx, frameRect.width * scaleX);
+    const sh = Math.min(canvas.height - sy, frameRect.height * scaleY);
+    const output = document.createElement("canvas");
+    output.width = Math.max(1, Math.round(sw));
+    output.height = Math.max(1, Math.round(sh));
+    output.getContext("2d").drawImage(canvas, sx, sy, sw, sh, 0, 0, output.width, output.height);
+    return output;
   }
 
   function bindGithubSettings() {
@@ -1249,9 +1531,11 @@
     document.querySelectorAll(".edit-page").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
+        const page = state.pages.find((item) => item.id === button.dataset.id);
         state.editId = button.dataset.id;
         state.selectedFiles = [];
         state.uploadErrors = [];
+        state.draft.logoId = page?.logo?.id || "";
         renderAdmin();
         document.getElementById("createPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
@@ -1346,6 +1630,8 @@
     const description = form.querySelector("#description").value.trim();
     const slugInput = form.querySelector("#slug").value.trim();
     const published = form.querySelector("#published").checked;
+    const selectedLogoId = form.querySelector("#pageLogo")?.value || "";
+    const selectedLogo = logoById(selectedLogoId);
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
     const pairState = selectedVideoThumbnailPairs();
 
@@ -1389,6 +1675,7 @@
             slug,
             published,
             files: [video, thumbnail],
+            logo: selectedLogo,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -1420,6 +1707,7 @@
         slug,
         published,
         files,
+        logo: selectedLogo,
         createdAt: existing.createdAt,
         updatedAt: new Date().toISOString(),
       };
@@ -1448,6 +1736,7 @@
       slug: "",
       published: true,
       slugTouched: false,
+      logoId: "",
     };
   }
 
@@ -1469,9 +1758,11 @@
       if (target.dataset.previewVideo !== undefined) {
         const poster = pageThumbnail(page);
         const posterSrc = poster ? await mediaSrc(poster) : "";
+        const logoUrl = logoSrc(page.logo);
+        const logoHtml = logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(page.logo.name)}" />` : "";
         target.innerHTML = isVideo
-          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>`
-          : `<img src="${src}" alt="${escapeHtml(media.name)}" />`;
+          ? `<video src="${src}" ${posterSrc ? `poster="${posterSrc}"` : ""} controls playsinline></video>${logoHtml}`
+          : `<img src="${src}" alt="${escapeHtml(media.name)}" />${logoHtml}`;
       } else if (target.dataset.galleryMedia !== undefined) {
         target.outerHTML = isVideo
           ? `<video src="${src}" muted playsinline></video>`
@@ -1503,6 +1794,8 @@
 
     const video = pageVideo(page);
     const thumbnail = pageThumbnail(page);
+    const logo = page.logo;
+    const logoUrl = logoSrc(logo);
     const videoSrc = await mediaSrc(video);
     const thumbnailSrc = await mediaSrc(thumbnail);
     app.innerHTML = `
@@ -1523,6 +1816,7 @@
                 ${video && video.type.startsWith("video/")
                   ? `<video src="${videoSrc}" ${thumbnailSrc ? `poster="${thumbnailSrc}"` : ""} controls playsinline></video>`
                   : `<img src="${thumbnailSrc || videoSrc}" alt="${escapeHtml(thumbnail ? thumbnail.name : page.title)}" />`}
+                ${logoUrl ? `<img class="video-logo-overlay" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(logo.name)}" />` : ""}
               </div>
               ${thumbnail ? `
                 <section class="public-gallery">
