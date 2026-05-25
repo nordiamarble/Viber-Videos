@@ -1263,6 +1263,11 @@ tr:last-child td {
   gap: 6px;
 }
 
+.editor-controls .editor-field {
+  display: grid;
+  gap: 6px;
+}
+
 .editor-controls span {
   font-size: 12px;
   font-weight: 760;

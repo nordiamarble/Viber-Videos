@@ -13,6 +13,7 @@
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
   const VIDEO_EXTENSIONS = new Set(["mp4", "3gp"]);
   const MOV_EXTENSIONS = new Set(["mov"]);
+  const MOV_MIME_TYPES = new Set(["video/quicktime", "video/x-quicktime", "video/mov"]);
   const FFMPEG_ESM_URL = "https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.12.10/esm/index.js";
   const FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
   const DEFAULT_GITHUB_SETTINGS = {
@@ -377,20 +378,18 @@
   function renderLogoOverlayControls(prefix, selectedLogoId, size, overlayText, overlaySubtext) {
     return `
       <div class="editor-control-group">
-        <label>
+        <div class="editor-field">
           <span>Λογότυπο επικάλυψης</span>
-          <select class="input" id="${prefix}LogoId">
-            <option value="">Χωρίς λογότυπο</option>
-            ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${selectedLogoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
-          </select>
-        </label>
-        <div class="logo-choice-grid compact">
-          ${allLogos().map((logo) => `
-            <button class="logo-choice ${selectedLogoId === logo.id ? "selected" : ""}" type="button" data-editor-prefix="${escapeHtml(prefix)}" data-logo-id="${escapeHtml(logo.id)}" title="${escapeHtml(logo.name)}">
-              <span class="logo-choice-preview"><img src="${escapeHtml(logoSrc(logo))}" alt="${escapeHtml(logo.name)}" /></span>
-              <span>${escapeHtml(logo.name)}</span>
-            </button>
-          `).join("")}
+          <div class="logo-row">
+            <select class="input" id="${prefix}LogoId">
+              <option value="">Χωρίς λογότυπο</option>
+              ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${selectedLogoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
+            </select>
+            <label class="secondary logo-upload-button">
+              ${icon("upload")} Νέο λογότυπο
+              <input id="${prefix}LogoInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+            </label>
+          </div>
         </div>
         <label>
           <span>Μέγεθος λογοτύπου</span>
@@ -634,7 +633,7 @@
     const extension = fileExtension(file);
     const isImage = IMAGE_EXTENSIONS.has(extension);
     const isVideo = VIDEO_EXTENSIONS.has(extension);
-    const isMov = MOV_EXTENSIONS.has(extension);
+    const isMov = MOV_EXTENSIONS.has(extension) || MOV_MIME_TYPES.has(String(file.type || "").toLowerCase());
 
     if (!isImage && !isVideo && !isMov) {
       return {
@@ -690,9 +689,11 @@
           convertedFrom: isMov ? file.name : "",
         },
       };
-    } catch {
+    } catch (error) {
       return {
-        error: `${file.name}: δεν μπόρεσα να το μετατρέψω/διαβάσω με ακρίβεια, άρα δεν δημιουργείται URL.`,
+        error: isMov
+          ? `${file.name}: το MOV δεν μετατράπηκε σε MP4. Δοκίμασε ξανά με μικρότερο MOV ή κάν' το export ως MP4.`
+          : `${file.name}: δεν μπόρεσα να διαβάσω με ακρίβεια τη διάρκεια, άρα δεν δημιουργείται URL.`,
       };
     }
   }
@@ -1143,7 +1144,7 @@
           <div class="field">
             <label>Βίντεο ή φωτογραφίες <span class="required">*</span></label>
             <label class="dropzone" id="dropzone">
-              <input id="mediaInput" type="file" accept=".png,.jpg,.jpeg,.mp4,.3gp,.mov,image/png,image/jpeg,video/mp4,video/3gpp,video/quicktime" ${state.processingFiles ? "disabled" : ""} multiple />
+              <input id="mediaInput" type="file" ${state.processingFiles ? "disabled" : ""} multiple />
               <span>
                 <span class="empty-icon">${icon("upload")}</span>
                 <p class="drop-title">Σύρε αρχεία εδώ ή <span>κάνε κλικ για επιλογή</span></p>
@@ -1155,45 +1156,6 @@
               ${renderSelectedFiles(editing)}
             </div>
             ${renderUploadErrors()}
-          </div>
-          <div class="field">
-            <label for="pageLogo">Λογότυπο επικάλυψης</label>
-            <div class="logo-row">
-              <select id="pageLogo" class="input">
-                <option value="">Χωρίς λογότυπο</option>
-                ${allLogos().map((logo) => `<option value="${escapeHtml(logo.id)}" ${draft.logoId === logo.id ? "selected" : ""}>${escapeHtml(logo.name)}</option>`).join("")}
-              </select>
-              <label class="secondary logo-upload-button">
-                ${icon("upload")} Νέο λογότυπο
-                <input id="logoInput" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
-              </label>
-            </div>
-            <div class="logo-choice-grid">
-              ${allLogos().map((logo) => `
-                <button class="logo-choice ${draft.logoId === logo.id ? "selected" : ""}" type="button" data-logo-id="${escapeHtml(logo.id)}" title="${escapeHtml(logo.name)}">
-                  <span class="logo-choice-preview"><img src="${escapeHtml(logoSrc(logo))}" alt="${escapeHtml(logo.name)}" /></span>
-                  <span>${escapeHtml(logo.name)}</span>
-                </button>
-              `).join("")}
-            </div>
-            <span class="hint">Το λογότυπο αποθηκεύεται για επόμενη χρήση και μπορεί να μπει πάνω σε thumbnail ή στο video player.</span>
-          </div>
-          <div class="field">
-            <label for="logoSize">Μέγεθος λογοτύπου</label>
-            <div class="range-row">
-              <input id="logoSize" type="range" min="8" max="35" step="1" value="${escapeHtml(draft.logoSize || 18)}" />
-              <input class="input range-number" id="logoSizeNumber" type="number" min="8" max="35" step="1" value="${escapeHtml(draft.logoSize || 18)}" />
-            </div>
-            <span class="hint">Ρυθμίζει το πλάτος του λογοτύπου ως ποσοστό της φωτογραφίας/video.</span>
-          </div>
-          <div class="field">
-            <label for="overlayText">Κείμενο επικάλυψης</label>
-            <input class="input" id="overlayText" maxlength="90" value="${escapeHtml(draft.overlayText || "")}" placeholder="π.χ. 2616 Bellagio" />
-            <span class="hint">Εμφανίζεται πάνω αριστερά και μπαίνει μέσα στο αρχείο φωτογραφίας που ανεβαίνει.</span>
-          </div>
-          <div class="field">
-            <label for="overlaySubtext">Μικρό κείμενο επικάλυψης</label>
-            <input class="input" id="overlaySubtext" maxlength="120" value="${escapeHtml(draft.overlaySubtext || "")}" placeholder="π.χ. Premium marble surfaces" />
           </div>
           <div class="switch-row">
             <div class="switch-copy">
@@ -1599,10 +1561,6 @@
     const title = document.getElementById("title");
     const description = document.getElementById("description");
     const slug = document.getElementById("slug");
-    const overlayText = document.getElementById("overlayText");
-    const overlaySubtext = document.getElementById("overlaySubtext");
-    const logoSize = document.getElementById("logoSize");
-    const logoSizeNumber = document.getElementById("logoSizeNumber");
     title?.addEventListener("input", () => {
       if (!state.editId) {
         state.draft.title = title.value;
@@ -1617,19 +1575,6 @@
     description?.addEventListener("input", () => {
       if (!state.editId) state.draft.description = description.value;
     });
-    overlayText?.addEventListener("input", () => {
-      state.draft.overlayText = overlayText.value;
-    });
-    overlaySubtext?.addEventListener("input", () => {
-      state.draft.overlaySubtext = overlaySubtext.value;
-    });
-    const syncLogoSize = (value) => {
-      state.draft.logoSize = clampNumber(value, 8, 35);
-      if (logoSize) logoSize.value = String(state.draft.logoSize);
-      if (logoSizeNumber) logoSizeNumber.value = String(state.draft.logoSize);
-    };
-    logoSize?.addEventListener("input", () => syncLogoSize(logoSize.value));
-    logoSizeNumber?.addEventListener("input", () => syncLogoSize(logoSizeNumber.value));
     slug?.addEventListener("input", () => {
       slug.value = slugify(slug.value);
       if (!state.editId) {
@@ -1641,18 +1586,6 @@
     });
     document.getElementById("published")?.addEventListener("change", (event) => {
       if (!state.editId) state.draft.published = event.target.checked;
-    });
-    document.getElementById("pageLogo")?.addEventListener("change", (event) => {
-      state.draft.logoId = event.target.value;
-    });
-    document.getElementById("logoInput")?.addEventListener("change", addLogoFromInput);
-    document.querySelectorAll(".logo-choice").forEach((button) => {
-      button.addEventListener("click", () => {
-        state.draft.logoId = button.dataset.logoId || "";
-        const select = document.getElementById("pageLogo");
-        if (select) select.value = state.draft.logoId;
-        renderAdmin();
-      });
     });
 
     bindDropzone();
@@ -1705,14 +1638,12 @@
     renderAdmin();
   }
 
-  async function addLogoFromInput(event) {
-    const file = event.target.files && event.target.files[0];
-    event.target.value = "";
+  async function saveLogoFile(file) {
     if (!file) return;
     const extension = fileExtension(file);
     if (!IMAGE_EXTENSIONS.has(extension)) {
       showToast("Το λογότυπο πρέπει να είναι png, jpg ή jpeg.");
-      return;
+      return null;
     }
     const dataUrl = await fileToDataUrl(file);
     const logo = {
@@ -1721,10 +1652,16 @@
       dataUrl,
     };
     state.logos = [logo, ...state.logos];
-    state.draft.logoId = logo.id;
     saveLogos();
-    renderAdmin();
     showToast("Το λογότυπο αποθηκεύτηκε.");
+    return logo;
+  }
+
+  async function addLogoFromInput(event, onLogo) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    const logo = await saveLogoFile(file);
+    if (logo && onLogo) onLogo(logo);
   }
 
   function openImageEditor(index) {
@@ -1855,9 +1792,9 @@
         else drawImageEditorCanvas();
       });
     });
-    document.querySelectorAll('[data-editor-prefix="imageEdit"]').forEach((button) => {
-      button.addEventListener("click", () => {
-        state.imageEditor.logoId = button.dataset.logoId || "";
+    document.getElementById("imageEditLogoInput")?.addEventListener("change", (event) => {
+      addLogoFromInput(event, (logo) => {
+        state.imageEditor.logoId = logo.id;
         renderAdmin();
       });
     });
@@ -1925,9 +1862,9 @@
       editor.overlaySubtext = overlaySubtext.value;
       syncVideoTextOverlay();
     });
-    document.querySelectorAll('[data-editor-prefix="videoEdit"]').forEach((button) => {
-      button.addEventListener("click", () => {
-        editor.logo = logoById(button.dataset.logoId || "");
+    document.getElementById("videoEditLogoInput")?.addEventListener("change", (event) => {
+      addLogoFromInput(event, (logo) => {
+        editor.logo = logo;
         rerenderVideoEditor();
       });
     });
@@ -2101,6 +2038,10 @@
       size: file.size,
       kind: "image",
     };
+    state.draft.logoId = editor.logoId || "";
+    state.draft.logoSize = editor.logoSize || 18;
+    state.draft.overlayText = editor.overlayText || "";
+    state.draft.overlaySubtext = editor.overlaySubtext || "";
     closeImageEditor();
     showToast("Το thumbnail ενημερώθηκε.");
   }
@@ -2283,13 +2224,13 @@
     const description = form.querySelector("#description").value.trim();
     const slugInput = form.querySelector("#slug").value.trim();
     const published = form.querySelector("#published").checked;
-    const selectedLogoId = form.querySelector("#pageLogo")?.value || "";
-    const selectedLogo = logoById(selectedLogoId);
-    const logoSize = clampNumber(form.querySelector("#logoSize")?.value || 18, 8, 35);
-    const overlayText = form.querySelector("#overlayText")?.value.trim() || "";
-    const overlaySubtext = form.querySelector("#overlaySubtext")?.value.trim() || "";
-    const overlayConfig = { logo: selectedLogo, logoSize, overlayText, overlaySubtext };
     const existing = state.editId ? state.pages.find((page) => page.id === state.editId) : null;
+    const selectedLogoId = state.draft.logoId || existing?.logo?.id || "";
+    const selectedLogo = logoById(selectedLogoId);
+    const logoSize = clampNumber(state.draft.logoSize || existing?.logoSize || 18, 8, 35);
+    const overlayText = String(state.draft.overlayText || existing?.overlayText || "").trim();
+    const overlaySubtext = String(state.draft.overlaySubtext || existing?.overlaySubtext || "").trim();
+    const overlayConfig = { logo: selectedLogo, logoSize, overlayText, overlaySubtext };
     const pairState = selectedVideoThumbnailPairs();
 
     if (existing && !title) {
