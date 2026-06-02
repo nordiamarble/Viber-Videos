@@ -1392,30 +1392,39 @@
   }
 
   function renderPagesList(pages) {
-    const rows = pages.map((page) => `
-      <tr data-row="${escapeHtml(page.id)}">
-        <td>
-          <div class="title-cell">
-            <div data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}" class="thumb-fallback">${icon("image")}</div>
-            <div>
-              <strong>${escapeHtml(page.title)}</strong>
-              <span>${escapeHtml(pageFileSummary(page))}</span>
+    const rows = pages.map((page) => {
+      const videoUrl = directMediaUrl(pageVideo(page));
+      return `
+        <tr data-row="${escapeHtml(page.id)}">
+          <td>
+            <div class="title-cell">
+              <div data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}" class="thumb-fallback">${icon("image")}</div>
+              <div>
+                <strong>${escapeHtml(page.title)}</strong>
+                <span>${escapeHtml(pageFileSummary(page))}</span>
+              </div>
             </div>
-          </div>
-        </td>
-        <td><span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span></td>
-        <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
-        <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
-        <td>
-          <div class="row-actions">
-            <button class="icon-button copy-url" data-slug="${escapeHtml(page.slug)}" title="Αντιγραφή URL">${icon("copy")}</button>
-            <button class="icon-button view-page" data-slug="${escapeHtml(page.slug)}" title="Προβολή">${icon("eye")}</button>
-            <button class="icon-button edit-page" data-id="${escapeHtml(page.id)}" title="Επεξεργασία">${icon("edit")}</button>
-            <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" title="Διαγραφή">${icon("trash")}</button>
-          </div>
-        </td>
-      </tr>
-    `).join("");
+          </td>
+          <td><span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span></td>
+          <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
+          <td>
+            <div class="table-url-copy">
+              <span class="slug-link">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
+              <button class="icon-button copy-direct-url" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")}</button>
+            </div>
+          </td>
+          <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
+          <td>
+            <div class="row-actions">
+              <button class="icon-button copy-url" data-slug="${escapeHtml(page.slug)}" title="Αντιγραφή URL σελίδας">${icon("copy")}</button>
+              <button class="icon-button view-page" data-slug="${escapeHtml(page.slug)}" title="Προβολή">${icon("eye")}</button>
+              <button class="icon-button edit-page" data-id="${escapeHtml(page.id)}" title="Επεξεργασία">${icon("edit")}</button>
+              <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" title="Διαγραφή">${icon("trash")}</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
 
     return `
       <section class="panel pages-list">
@@ -1438,6 +1447,7 @@
                   <th>Τίτλος</th>
                   <th>Τύπος</th>
                   <th>URL</th>
+                  <th>URL βίντεο</th>
                   <th>Κατάσταση</th>
                   <th>Ενέργειες</th>
                 </tr>
