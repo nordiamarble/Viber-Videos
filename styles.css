@@ -720,19 +720,30 @@ tr:last-child td {
   font-size: 12px;
 }
 
-.row-video-url {
+.row-media-url {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 92px minmax(260px, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
   margin-top: 8px;
-  max-width: 520px;
+  max-width: 820px;
 }
 
-.row-video-url > span:first-child {
+.row-media-url > span:first-child {
   color: var(--accent-dark);
   font-size: 11px;
   font-weight: 820;
+}
+
+.full-media-url {
+  color: #33404b;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .mini-copy {

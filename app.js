@@ -1396,6 +1396,7 @@
   function renderPagesList(pages) {
     const rows = pages.map((page) => {
       const videoUrl = directMediaUrl(pageVideo(page));
+      const thumbnailUrl = directMediaUrl(pageThumbnail(page));
       return `
         <tr data-row="${escapeHtml(page.id)}">
           <td>
@@ -1404,10 +1405,15 @@
               <div>
                 <strong>${escapeHtml(page.title)}</strong>
                 <span>${escapeHtml(pageFileSummary(page))}</span>
-                <div class="row-video-url">
+                <div class="row-media-url">
                   <span>URL βίντεο</span>
-                  <span class="slug-link">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
+                  <span class="full-media-url">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
                   <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")} Copy</button>
+                </div>
+                <div class="row-media-url">
+                  <span>URL thumbnail</span>
+                  <span class="full-media-url">${escapeHtml(thumbnailUrl || "Δεν υπάρχει thumbnail")}</span>
+                  <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(thumbnailUrl)}" ${thumbnailUrl ? "" : "disabled"} title="Αντιγραφή URL thumbnail">${icon("copy")} Copy</button>
                 </div>
               </div>
             </div>
