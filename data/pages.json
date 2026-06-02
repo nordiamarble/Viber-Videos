@@ -1,0 +1,48 @@
+{
+  "pages": [
+    {
+      "id": "1779788228877-2plsz6f07zu",
+      "title": "Volakas Sea Wave",
+      "description": "",
+      "slug": "volakas-sea-wave",
+      "published": true,
+      "files": [
+        {
+          "id": "1779788225580-9cc2uonv9",
+          "name": "Volakas Sea Wave.mp4",
+          "type": "video/mp4",
+          "size": 6529594,
+          "kind": "video",
+          "durationSeconds": 8.666667,
+          "playback": {
+            "startSeconds": 0,
+            "durationSeconds": 8.67
+          },
+          "githubPath": "media/2026-05-26/volakas-sea-wave-video-Volakas-Sea-Wave.mp4",
+          "remoteUrl": "https://raw.githubusercontent.com/nordiamarble/Viber-Videos/main/media/2026-05-26/volakas-sea-wave-video-Volakas-Sea-Wave.mp4"
+        },
+        {
+          "id": "1779788228877-tpzwk5cm8qg",
+          "name": "Naxos (2) edited-overlay.png",
+          "type": "image/png",
+          "size": 1555150,
+          "kind": "image",
+          "playback": null,
+          "githubPath": "media/2026-05-26/volakas-sea-wave-thumbnail-Naxos-2-edited-overlay.png",
+          "remoteUrl": "https://raw.githubusercontent.com/nordiamarble/Viber-Videos/main/media/2026-05-26/volakas-sea-wave-thumbnail-Naxos-2-edited-overlay.png"
+        }
+      ],
+      "logo": {
+        "id": "builtin-dionyssomarble-nordia",
+        "name": "Διπλό λογότυπο",
+        "url": "./assets/logos/dionyssomarble-nordia-combo-transparent.png"
+      },
+      "logoSize": 14,
+      "overlayText": "",
+      "overlaySubtext": "",
+      "createdAt": "2026-05-26T09:37:08.877Z",
+      "updatedAt": "2026-05-26T09:37:08.877Z"
+    }
+  ],
+  "logos": []
+}
