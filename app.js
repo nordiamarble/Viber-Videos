@@ -1402,17 +1402,16 @@
               <div>
                 <strong>${escapeHtml(page.title)}</strong>
                 <span>${escapeHtml(pageFileSummary(page))}</span>
+                <div class="row-video-url">
+                  <span>URL βίντεο</span>
+                  <span class="slug-link">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
+                  <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")} Copy</button>
+                </div>
               </div>
             </div>
           </td>
           <td><span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span></td>
           <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
-          <td>
-            <div class="table-url-copy">
-              <span class="slug-link">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
-              <button class="icon-button copy-direct-url" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")}</button>
-            </div>
-          </td>
           <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
           <td>
             <div class="row-actions">
@@ -1447,7 +1446,6 @@
                   <th>Τίτλος</th>
                   <th>Τύπος</th>
                   <th>URL</th>
-                  <th>URL βίντεο</th>
                   <th>Κατάσταση</th>
                   <th>Ενέργειες</th>
                 </tr>
