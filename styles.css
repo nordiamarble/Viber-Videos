@@ -685,6 +685,10 @@ textarea {
   cursor: pointer;
 }
 
+.page-card.collapsed {
+  align-items: center;
+}
+
 .page-card:hover {
   border-color: rgba(0, 140, 140, 0.36);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
@@ -749,6 +753,31 @@ textarea {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.compact-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.compact-toggle svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 160ms ease;
+}
+
+.page-card.expanded .compact-toggle svg {
+  transform: rotate(180deg);
+}
+
+.page-card-details {
+  display: grid;
+  gap: 12px;
+}
+
+.page-card-details[hidden] {
+  display: none;
 }
 
 .media-url-list {

@@ -5,6 +5,7 @@
   const META_KEY = "media-pages:pages";
   const SETTINGS_KEY = "media-pages:github-settings";
   const LOGOS_KEY = "media-pages:logos";
+  const EXPANDED_ROWS_KEY = "media-pages:expanded-rows";
   const INDEX_PATH = "data/pages.json";
   const GITHUB_API_VERSION = "2022-11-28";
   const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
@@ -119,6 +120,7 @@
       overlaySubtext: "",
     },
     previewOpen: localStorage.getItem("media-pages:preview-open") !== "false",
+    expandedRows: new Set(loadExpandedRows()),
     settingsOpen: false,
     imageEditor: null,
     videoEditor: null,
@@ -310,6 +312,19 @@
 
   function saveLogos() {
     localStorage.setItem(LOGOS_KEY, JSON.stringify(state.logos));
+  }
+
+  function loadExpandedRows() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(EXPANDED_ROWS_KEY) || "[]");
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveExpandedRows() {
+    localStorage.setItem(EXPANDED_ROWS_KEY, JSON.stringify(Array.from(state.expandedRows)));
   }
 
   function mergeLogos(logos) {
@@ -1398,8 +1413,9 @@
       const videoUrl = directMediaUrl(pageVideo(page));
       const thumbnailUrl = directMediaUrl(pageThumbnail(page));
       const publicUrl = pageUrl(page.slug);
+      const isExpanded = state.expandedRows.has(page.id);
       return `
-        <article class="page-card" data-row="${escapeHtml(page.id)}">
+        <article class="page-card ${isExpanded ? "expanded" : "collapsed"}" data-row="${escapeHtml(page.id)}">
           <div class="page-card-media" data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}">
             ${icon("image")}
           </div>
@@ -1412,9 +1428,13 @@
               <div class="page-card-meta">
                 <span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span>
                 <span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span>
+                <button class="secondary compact-toggle toggle-page-details" type="button" data-id="${escapeHtml(page.id)}" aria-expanded="${isExpanded ? "true" : "false"}">
+                  ${icon("chevron")} ${isExpanded ? "Σύμπτυξη" : "Άνοιγμα"}
+                </button>
               </div>
             </div>
-            <div class="media-url-list">
+            <div class="page-card-details" ${isExpanded ? "" : "hidden"}>
+              <div class="media-url-list">
               <div class="media-url-row">
                 <span>Σελίδα</span>
                 <code>${escapeHtml(publicUrl)}</code>
@@ -1430,11 +1450,12 @@
                 <code>${escapeHtml(thumbnailUrl || "Δεν υπάρχει thumbnail")}</code>
                 <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(thumbnailUrl)}" ${thumbnailUrl ? "" : "disabled"} title="Αντιγραφή URL thumbnail">${icon("copy")} Copy</button>
               </div>
-            </div>
-            <div class="page-card-actions">
-              <a class="secondary page-action-link" href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener">${icon("eye")} Προβολή</a>
-              <button class="secondary edit-page" data-id="${escapeHtml(page.id)}" type="button">${icon("edit")} Επεξεργασία</button>
-              <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" type="button" title="Διαγραφή">${icon("trash")}</button>
+              </div>
+              <div class="page-card-actions">
+                <a class="secondary page-action-link" href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener">${icon("eye")} Προβολή</a>
+                <button class="secondary edit-page" data-id="${escapeHtml(page.id)}" type="button">${icon("edit")} Επεξεργασία</button>
+                <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" type="button" title="Διαγραφή">${icon("trash")}</button>
+              </div>
             </div>
           </div>
         </article>
@@ -1621,6 +1642,12 @@
     document.querySelectorAll(".edit-existing-video").forEach((button) => {
       button.addEventListener("click", () => openExistingVideoEditor(button.dataset.id));
     });
+    document.querySelectorAll(".toggle-page-details").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        togglePageDetails(button.dataset.id);
+      });
+    });
     document.querySelectorAll(".file-rename").forEach((input) => {
       input.addEventListener("input", () => {
         const item = state.selectedFiles[Number(input.dataset.index)];
@@ -1638,6 +1665,14 @@
     bindImageEditorControls();
     drawImageEditorCanvas();
     bindVideoEditorControls();
+  }
+
+  function togglePageDetails(id) {
+    if (!id) return;
+    if (state.expandedRows.has(id)) state.expandedRows.delete(id);
+    else state.expandedRows.add(id);
+    saveExpandedRows();
+    renderAdmin();
   }
 
   function togglePreview() {
@@ -2138,6 +2173,8 @@
           if (!file.remoteUrl) await deleteFile(file.id);
         }
         state.pages = state.pages.filter((item) => item.id !== page.id);
+        state.expandedRows.delete(page.id);
+        saveExpandedRows();
         if (state.selectedId === page.id) state.selectedId = state.pages[0]?.id || "";
         if (state.editId === page.id) clearFormState();
         savePages();
@@ -2298,6 +2335,8 @@
         }
         state.pages = [...createdPages, ...state.pages];
         state.selectedId = createdPages[0].id;
+        createdPages.forEach((page) => state.expandedRows.add(page.id));
+        saveExpandedRows();
         savePages();
         await syncPagesToGithub();
         clearFormState();
@@ -2333,6 +2372,8 @@
 
       state.pages = state.pages.map((item) => (item.id === page.id ? page : item));
       state.selectedId = page.id;
+      state.expandedRows.add(page.id);
+      saveExpandedRows();
       savePages();
       await syncPagesToGithub();
       clearFormState();
