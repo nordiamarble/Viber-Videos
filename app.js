@@ -488,7 +488,7 @@
   }
 
   function directMediaUrl(media) {
-    const url = media?.remoteUrl || "";
+    const url = media?.githubPath ? publicMediaUrl(media.githubPath) : media?.remoteUrl || "";
     return /^https?:\/\//.test(url) ? url : "";
   }
 
@@ -832,9 +832,9 @@
     return path.split("/").map(encodeURIComponent).join("/");
   }
 
-  function rawGithubUrl(path) {
-    const { owner, repo, branch } = state.github;
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  function publicMediaUrl(path) {
+    const base = state.github.siteBaseUrl || DEFAULT_GITHUB_SETTINGS.siteBaseUrl;
+    return `${base.replace(/\/+$/, "")}/${String(path || "").replace(/^\/+/, "")}`;
   }
 
   async function fileToBase64(file) {
@@ -892,7 +892,7 @@
       durationSeconds: item.durationSeconds,
       playback: item.playback || null,
       githubPath: path,
-      remoteUrl: rawGithubUrl(path),
+      remoteUrl: publicMediaUrl(path),
     };
   }
 
@@ -905,6 +905,7 @@
       const url = URL.createObjectURL(item.file);
       return { url, revoke: () => URL.revokeObjectURL(url) };
     }
+    if (item.githubPath) return { url: publicMediaUrl(item.githubPath), revoke: () => {} };
     if (item.remoteUrl) return { url: item.remoteUrl, revoke: () => {} };
     return { url: "", revoke: () => {} };
   }
@@ -1006,6 +1007,7 @@
 
   async function mediaSrc(media) {
     if (!media) return "";
+    if (media.githubPath) return publicMediaUrl(media.githubPath);
     if (media.remoteUrl) return media.remoteUrl;
     if (state.objectUrls.has(media.id)) return state.objectUrls.get(media.id);
     const file = await getFile(media.id);
