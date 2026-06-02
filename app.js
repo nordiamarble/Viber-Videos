@@ -1394,42 +1394,50 @@
   }
 
   function renderPagesList(pages) {
-    const rows = pages.map((page) => {
+    const cards = pages.map((page) => {
       const videoUrl = directMediaUrl(pageVideo(page));
       const thumbnailUrl = directMediaUrl(pageThumbnail(page));
+      const publicUrl = pageUrl(page.slug);
       return `
-        <tr data-row="${escapeHtml(page.id)}">
-          <td>
-            <div class="title-cell">
-              <div data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}" class="thumb-fallback">${icon("image")}</div>
+        <article class="page-card" data-row="${escapeHtml(page.id)}">
+          <div class="page-card-media" data-thumb="${escapeHtml((pageThumbnail(page) || {}).id || "")}">
+            ${icon("image")}
+          </div>
+          <div class="page-card-main">
+            <div class="page-card-head">
               <div>
-                <strong>${escapeHtml(page.title)}</strong>
-                <span>${escapeHtml(pageFileSummary(page))}</span>
-                <div class="row-media-url">
-                  <span>URL βίντεο</span>
-                  <span class="full-media-url">${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</span>
-                  <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")} Copy</button>
-                </div>
-                <div class="row-media-url">
-                  <span>URL thumbnail</span>
-                  <span class="full-media-url">${escapeHtml(thumbnailUrl || "Δεν υπάρχει thumbnail")}</span>
-                  <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(thumbnailUrl)}" ${thumbnailUrl ? "" : "disabled"} title="Αντιγραφή URL thumbnail">${icon("copy")} Copy</button>
-                </div>
+                <h3>${escapeHtml(page.title)}</h3>
+                <p>${escapeHtml(pageFileSummary(page))}</p>
+              </div>
+              <div class="page-card-meta">
+                <span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span>
+                <span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span>
               </div>
             </div>
-          </td>
-          <td><span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span></td>
-          <td><span class="slug-link">${escapeHtml(pageUrl(page.slug))}</span></td>
-          <td><span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span></td>
-          <td>
-            <div class="row-actions">
-              <button class="icon-button copy-url" data-slug="${escapeHtml(page.slug)}" title="Αντιγραφή URL σελίδας">${icon("copy")}</button>
-              <button class="icon-button view-page" data-slug="${escapeHtml(page.slug)}" title="Προβολή">${icon("eye")}</button>
-              <button class="icon-button edit-page" data-id="${escapeHtml(page.id)}" title="Επεξεργασία">${icon("edit")}</button>
-              <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" title="Διαγραφή">${icon("trash")}</button>
+            <div class="media-url-list">
+              <div class="media-url-row">
+                <span>Σελίδα</span>
+                <code>${escapeHtml(publicUrl)}</code>
+                <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(publicUrl)}" title="Αντιγραφή URL σελίδας">${icon("copy")} Copy</button>
+              </div>
+              <div class="media-url-row">
+                <span>Βίντεο</span>
+                <code>${escapeHtml(videoUrl || "Δεν υπάρχει βίντεο")}</code>
+                <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(videoUrl)}" ${videoUrl ? "" : "disabled"} title="Αντιγραφή URL βίντεο">${icon("copy")} Copy</button>
+              </div>
+              <div class="media-url-row">
+                <span>Thumbnail</span>
+                <code>${escapeHtml(thumbnailUrl || "Δεν υπάρχει thumbnail")}</code>
+                <button class="mini-copy copy-direct-url" type="button" data-url="${escapeHtml(thumbnailUrl)}" ${thumbnailUrl ? "" : "disabled"} title="Αντιγραφή URL thumbnail">${icon("copy")} Copy</button>
+              </div>
             </div>
-          </td>
-        </tr>
+            <div class="page-card-actions">
+              <button class="secondary view-page" data-slug="${escapeHtml(page.slug)}" type="button">${icon("eye")} Προβολή</button>
+              <button class="secondary edit-page" data-id="${escapeHtml(page.id)}" type="button">${icon("edit")} Επεξεργασία</button>
+              <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" type="button" title="Διαγραφή">${icon("trash")}</button>
+            </div>
+          </div>
+        </article>
       `;
     }).join("");
 
@@ -1446,20 +1454,9 @@
             </label>
           </div>
         </div>
-        ${rows ? `
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Τίτλος</th>
-                  <th>Τύπος</th>
-                  <th>URL</th>
-                  <th>Κατάσταση</th>
-                  <th>Ενέργειες</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
+        ${cards ? `
+          <div class="pages-card-list">
+            ${cards}
           </div>
           <div class="table-footer">
             <div class="pagination">
@@ -1631,7 +1628,7 @@
       });
     });
 
-    document.querySelectorAll("tr[data-row]").forEach((row) => {
+    document.querySelectorAll("[data-row]").forEach((row) => {
       row.addEventListener("click", (event) => {
         if (event.target.closest("button")) return;
         state.selectedId = row.dataset.row;
