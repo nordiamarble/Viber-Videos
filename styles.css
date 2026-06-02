@@ -756,15 +756,27 @@ textarea {
 }
 
 .compact-toggle {
-  min-height: 30px;
-  padding: 0 10px;
-  font-size: 12px;
+  min-height: 38px;
+  min-width: 118px;
+  padding: 0 14px;
+  border-color: rgba(0, 146, 142, 0.35);
+  background: #e7f7f5;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 880;
+  box-shadow: 0 1px 0 rgba(0, 146, 142, 0.08);
 }
 
 .compact-toggle svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   transition: transform 160ms ease;
+}
+
+.compact-toggle:hover {
+  border-color: var(--accent);
+  background: #d9f2ef;
+  color: var(--accent-dark);
 }
 
 .page-card.expanded .compact-toggle svg {
@@ -831,10 +843,6 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.page-action-link {
-  text-decoration: none;
 }
 
 .table-wrap {

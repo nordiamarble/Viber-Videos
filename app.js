@@ -1429,7 +1429,7 @@
                 <span class="status ${page.published ? "live" : "draft"}">${page.published ? "Δημοσιευμένη" : "Πρόχειρο"}</span>
                 <span class="type-chip">${icon("video")} ${mediaKind(page.files)}</span>
                 <button class="secondary compact-toggle toggle-page-details" type="button" data-id="${escapeHtml(page.id)}" aria-expanded="${isExpanded ? "true" : "false"}">
-                  ${icon("chevron")} ${isExpanded ? "Σύμπτυξη" : "Άνοιγμα"}
+                  ${icon("chevron")} ${isExpanded ? "Σύμπτυξη" : "Ανάπτυξη"}
                 </button>
               </div>
             </div>
@@ -1452,7 +1452,7 @@
               </div>
               </div>
               <div class="page-card-actions">
-                <a class="secondary page-action-link" href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener">${icon("eye")} Προβολή</a>
+                <button class="secondary view-page" data-slug="${escapeHtml(page.slug)}" type="button">${icon("eye")} Προβολή</button>
                 <button class="secondary edit-page" data-id="${escapeHtml(page.id)}" type="button">${icon("edit")} Επεξεργασία</button>
                 <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" type="button" title="Διαγραφή">${icon("trash")}</button>
               </div>
@@ -2144,7 +2144,7 @@
     document.querySelectorAll(".view-page").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
-        window.open(pageUrl(button.dataset.slug), "_blank");
+        window.location.href = pageUrl(button.dataset.slug);
       });
     });
     document.querySelectorAll(".edit-page").forEach((button) => {
