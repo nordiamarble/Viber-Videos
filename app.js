@@ -1432,7 +1432,7 @@
               </div>
             </div>
             <div class="page-card-actions">
-              <button class="secondary view-page" data-slug="${escapeHtml(page.slug)}" type="button">${icon("eye")} Προβολή</button>
+              <a class="secondary page-action-link" href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener">${icon("eye")} Προβολή</a>
               <button class="secondary edit-page" data-id="${escapeHtml(page.id)}" type="button">${icon("edit")} Επεξεργασία</button>
               <button class="icon-button delete-page" data-id="${escapeHtml(page.id)}" type="button" title="Διαγραφή">${icon("trash")}</button>
             </div>
@@ -1630,7 +1630,7 @@
 
     document.querySelectorAll("[data-row]").forEach((row) => {
       row.addEventListener("click", (event) => {
-        if (event.target.closest("button")) return;
+        if (event.target.closest("button, a")) return;
         state.selectedId = row.dataset.row;
         renderAdmin();
       });
